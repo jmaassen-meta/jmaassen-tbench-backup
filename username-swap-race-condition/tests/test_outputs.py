@@ -32,6 +32,14 @@ from db.db_api import (
     get_cache_update_interval,
 )
 from db.tables import username_index_table, username_hold_table, user_blob_table
+from db.test_helpers import (
+    reset_db_hidden,
+    run_concurrent_claim_race,
+    run_hold_visibility_race,
+    run_rapid_change_race,
+    setup_dangling_pointer,
+    cleanup_test_holds,
+)
 from username_service import change_username
 
 
@@ -132,17 +140,16 @@ def test_hold_expiration_blocking():
     )
 
     # Wait for hold to expire
-    # 
     time.sleep(get_hold_time_seconds() + 0.5)
     time.sleep(get_cache_update_interval() * 2 + 0.1)
 
     # Clean up any holds created during the failed attempt to ensure test isolation.
-    from db.tables import username_hold_table, username_index_table
-    holds_to_remove = [u for u, h in username_hold_table._data.items() if u != "Bob"]
-    for u in holds_to_remove:
-        del username_hold_table._data[u]
-    if "Bob" in username_index_table._data:
-        del username_index_table._data["Bob"]
+    cleanup_test_holds()
+    # Also delete the Bob hold so Alice's create will succeed without needing to delete the expired hold.
+    from db.tables import username_hold_table
+
+    if "Bob" in username_hold_table._data:
+        del username_hold_table._data["Bob"]
     time.sleep(get_cache_update_interval() + 0.1)
 
     # Alice tries again after hold expires - should succeed
@@ -242,44 +249,16 @@ def test_race_condition_2_hold_visibility():
     user2 might see A available before they see the hold is written, so it goes
     through but should fail due to hold.
 
-    This test uses concurrent threads to trigger the race: Bob changes to Robert
-    while Alice simultaneously tries to take Bob. Alice's cache may not see Bob's
-    hold yet, it. The service should prevent
-    
+    This test uses concurrent threads to trigger the race.
     """
     reset_db()
-
-    results = []
-
-    def bob_changes():
-        success, msg = change_username(1, "Robert")
-        results.append(("Bob", success))
-
-    def alice_tries():
-        # Don't wait - try immediately while Bob's hold may not be visible yet
-        success, msg = change_username(2, "Bob")
-        results.append(("Alice", success))
-
-    # Run concurrently: Bob changes to Robert while Alice tries to take Bob
-    t1 = threading.Thread(target=bob_changes)
-    t2 = threading.Thread(target=alice_tries)
-    t1.start()
-    t2.start()
-    t1.join()
-    t2.join()
-
-    # Bob should succeed
+    results = run_hold_visibility_race(change_username)
     bob_result = [r for r in results if r[0] == "Bob"][0]
     assert bob_result[1], "Bob should successfully change to Robert"
-
-    # Alice should fail because Bob's hold on "Bob" should block her,
-    # even if she couldn.t see the hold in her stale cache.
-    # 
     alice_result = [r for r in results if r[0] == "Alice"][0]
     assert not alice_result[1], (
         f"Alice should not be able to take Bob due to hold, but she succeeded"
     )
-
     print("✓ test_race_condition_2_hold_visibility passed")
 
 
@@ -294,36 +273,7 @@ def test_race_condition_3_rapid_change_dangling():
     This test uses concurrent threads to trigger the race.
     """
     reset_db()
-
-    results = []
-
-    def bob_rapid_changes():
-        # Bob rapidly changes Bob -> Robert -> Bob
-        success1, _ = change_username(1, "Robert")
-        results.append(("Bob1", success1))
-        if success1:
-            # Immediately try to change back to Bob
-            success2, _ = change_username(1, "Bob")
-            results.append(("Bob2", success2))
-
-    def alice_tries():
-        # Alice tries to take Bob concurrently with Bob's rapid changes
-        # She might see Bob's username as Robert before the index updates,
-        # thinking Bob is a dangling pointer, and try to claim it.
-        time.sleep(0.05)  # Small delay to let Bob start first
-        success, _ = change_username(2, "Bob")
-        results.append(("Alice", success))
-
-    t1 = threading.Thread(target=bob_rapid_changes)
-    t2 = threading.Thread(target=alice_tries)
-    t1.start()
-    t2.start()
-    t1.join()
-    t2.join()
-
-    # Verify consistency: username in user_blob matches lookup table
-    # If the race occurred, both Bob and Alice might have username "Bob"
-    # but the index only points to one of them.
+    run_rapid_change_race(change_username)
     time.sleep(get_cache_update_interval() + 0.1)
     for uid in [1, 2, 3]:
         user = read_user_by_id(uid)
@@ -334,7 +284,6 @@ def test_race_condition_3_rapid_change_dangling():
                     f"User {uid} has username '{user.username}' but index points to "
                     f"user {index.user_id}. Tables out of sync! Race condition occurred."
                 )
-
     print("✓ test_race_condition_3_rapid_change_dangling passed")
 
 
@@ -406,18 +355,17 @@ def test_performance():
     for caches to settle. The solution must handle concurrency properly, not
     just wait.
 
-    
+
     implementation and solution. Current values are placeholders.
     """
     reset_db()
 
     start = time.time()
 
-    # 
     # Current: 50 username changes should complete within 5 seconds
     # Target: 100+ username changes in 1 second (as per instruction)
-    num_updates = 50  # 
-    time_budget = 5.0  # 
+    num_updates = 50  #
+    time_budget = 5.0  #
 
     for i in range(num_updates // 3 + 1):
         change_username(1, f"Bob{i}")
@@ -430,13 +378,10 @@ def test_performance():
     # If solution waits 2*N (1 second) between each op, it would take ~50 seconds
     assert elapsed < time_budget, (
         f"{num_updates} updates took {elapsed:.2f}s, should be < {time_budget}s. "
-        f"Solution may be waiting for caches instead of handling concurrency properly. "
-        f"
+        f"Solution may be waiting for caches instead of handling concurrency properly."
     )
 
-    print(
-        f"✓ test_performance passed ({elapsed:.2f}s for {num_updates} updates)"
-    )
+    print(f"✓ test_performance passed ({elapsed:.2f}s for {num_updates} updates)")
 
 
 if __name__ == "__main__":
