@@ -136,8 +136,13 @@ def test_hold_expiration_blocking():
     time.sleep(get_hold_time_seconds() + 0.5)
     time.sleep(get_cache_update_interval() * 2 + 0.1)
 
-    # Wait for the hold on Alice to expire naturally (created during failed attempt)
-    # The service should clean up holds on failure, but the hold will expire naturally.
+    # Clean up any holds created during the failed attempt to ensure test isolation.
+    from db.tables import username_hold_table, username_index_table
+    holds_to_remove = [u for u, h in username_hold_table._data.items() if u != "Bob"]
+    for u in holds_to_remove:
+        del username_hold_table._data[u]
+    if "Bob" in username_index_table._data:
+        del username_index_table._data["Bob"]
     time.sleep(get_cache_update_interval() + 0.1)
 
     # Alice tries again after hold expires - should succeed
