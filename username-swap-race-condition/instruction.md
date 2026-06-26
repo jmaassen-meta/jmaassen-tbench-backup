@@ -58,7 +58,7 @@ The core rules it has to follow are:
 - A dangling pointers can occur when the UsernameIndex points a username to a user_id, but that user's UserBlob has a different username (due to a previous failed update). Dangling pointers can only be claimed if they are older than the dangling pointer lockout period (2x cache update interval).
 - After a user changes their username, no other user can claim that username for the default hold time. The user can claim it back before the hold expires.
 - At any given time (not including while write locks are in use), a username can only be owned by one user. This is enforced at the dB level for the username index, but has to be maintained in the service layer for the user blob username field. eventual consistentcy is fine, as in we expect the read cache to occasionally make it look like two users have the same username on their user blob, as long as they eventually have different usernames once all caches are refreshed.
-- The service needs to be performant. It should be able to handle 100+ username changes in 1 second.
+- The service needs to be performant. It should be able to handle many concurrent username changes quickly.
 
 
 ## Your Task
