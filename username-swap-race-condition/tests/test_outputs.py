@@ -250,27 +250,44 @@ def test_race_condition_2_hold_visibility():
     Race Condition 2: If user1 changes from A to B and user2 changes from C to A,
     user2 might see A available before they see the hold is written, so it goes
     through but should fail due to hold.
+
+    This test uses concurrent threads to trigger the race: Bob changes to Robert
+    while Alice simultaneously tries to take Bob. Alice's cache may not see Bob's
+    hold yet, it. The service should prevent
+    
     """
     reset_db()
 
-    # Bob changes from "Bob" to "Robert", creating hold on "Bob"
-    # But user2's cache hasn't updated yet, so they don't see the hold
-    success, _ = change_username(1, "Robert")
-    assert success
+    results = []
 
-    # Immediately (before cache updates), Alice tries to take "Bob"
-    # Her cache doesn't see the hold yet, so buggy version lets it through
-    # Fixed version should check hold via direct read or handle the race
+    def bob_changes():
+        success, msg = change_username(1, "Robert")
+        results.append(("Bob", success))
 
-    # Simulate by not waiting for cache - Alice's cache is stale
-    # In real scenario, this happens due to distributed cache staleness
+    def alice_tries():
+        # Don't wait - try immediately while Bob's hold may not be visible yet
+        success, msg = change_username(2, "Bob")
+        results.append(("Alice", success))
 
-    # For the test, we'll verify that after the hold is visible, Alice cannot take Bob
-    time.sleep(get_cache_update_interval() * 2 + 0.1)
+    # Run concurrently: Bob changes to Robert while Alice tries to take Bob
+    t1 = threading.Thread(target=bob_changes)
+    t2 = threading.Thread(target=alice_tries)
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
 
-    success, msg = change_username(2, "Bob")
-    # Should fail because Bob has a hold
-    assert not success, f"Alice should not be able to take Bob due to hold: {msg}"
+    # Bob should succeed
+    bob_result = [r for r in results if r[0] == "Bob"][0]
+    assert bob_result[1], "Bob should successfully change to Robert"
+
+    # Alice should fail because Bob's hold on "Bob" should block her,
+    # even if she couldn.t see the hold in her stale cache.
+    # 
+    alice_result = [r for r in results if r[0] == "Alice"][0]
+    assert not alice_result[1], (
+        f"Alice should not be able to take Bob due to hold, but she succeeded"
+    )
 
     print("✓ test_race_condition_2_hold_visibility passed")
 
@@ -283,43 +300,56 @@ def test_race_condition_3_rapid_change_dangling():
     This leads to invalid state where both user1 and user2 have user.username of A
     but lookup only points to user2.
 
-    The fix: Create a hold for the target username before proceeding. If the hold
-    already exists (even if we couldn't see it due to cache staleness), the create
-    will fail and we abort. This ensures the dangling pointer race is prevented.
+    This test uses concurrent threads to trigger the race.
     """
     reset_db()
 
-    # This is a complex race that requires precise timing
-    # Simplified test: verify that after rapid changes, the state remains consistent
+    results = []
 
-    # Bob changes Bob -> Robert -> Bob rapidly
-    success1, _ = change_username(1, "Robert")
-    assert success1
+    def bob_rapid_changes():
+        # Bob rapidly changes Bob -> Robert -> Bob
+        success1, _ = change_username(1, "Robert")
+        results.append(("Bob1", success1))
+        if success1:
+            # Immediately try to change back to Bob
+            success2, _ = change_username(1, "Bob")
+            results.append(("Bob2", success2))
 
-    time.sleep(0.1)  # Small delay but not enough for all caches
+    def alice_tries():
+        # Alice tries to take Bob concurrently with Bob's rapid changes
+        # She might see Bob's username as Robert before the index updates,
+        # thinking Bob is a dangling pointer, and try to claim it.
+        time.sleep(0.05)  # Small delay to let Bob start first
+        success, _ = change_username(2, "Bob")
+        results.append(("Alice", success))
 
-    success2, _ = change_username(1, "Bob")
-    # This may fail due to hold, or succeed if hold expired/not yet visible
-
-    time.sleep(get_cache_update_interval() * 2 + 0.1)
+    t1 = threading.Thread(target=bob_rapid_changes)
+    t2 = threading.Thread(target=alice_tries)
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
 
     # Verify consistency: username in user_blob matches lookup table
+    # If the race occurred, both Bob and Alice might have username "Bob"
+    # but the index only points to one of them.
+    time.sleep(get_cache_update_interval() + 0.1)
     for uid in [1, 2, 3]:
         user = read_user_by_id(uid)
-        index = read_username_index(user.username)
-        if index:
-            assert index.user_id == uid, (
-                f"User {uid} has username '{user.username}' but index points to "
-                f"user {index.user_id}. Tables out of sync!"
-            )
+        if user:
+            index = read_username_index(user.username)
+            if index:
+                assert index.user_id == uid, (
+                    f"User {uid} has username '{user.username}' but index points to "
+                    f"user {index.user_id}. Tables out of sync! Race condition occurred."
+                )
 
     print("✓ test_race_condition_3_rapid_change_dangling passed")
 
 
 def test_target_hold_prevents_dangling_race():
     """
-    Test that creating a hold for the target username prevents the dangling
-    pointer race condition.
+    Test that the dangling pointer race condition is prevented.
 
     Scenario:
     - User1 changes A->B, creating hold on A, updating index, updating user.blob
@@ -329,11 +359,9 @@ def test_target_hold_prevents_dangling_race():
       dangling pointer. If the dangling pointer is older than lockout, user2
       deletes it and takes A.
     - But user1 just created a hold on A, which user2 couldn't see yet.
-    - Without target hold: Both user1 and user2 think they own A. Invalid state!
-    - With target hold: User2 tries to create hold on A, but the hold already
-      exists (created by user1), so the create fails and user2 aborts. Race prevented!
-
-    This test verifies that the target hold is created and prevents the race.
+    - This should not lead to both users owning A. The service must prevent
+      the invalid state where both user1 and user2 have user.username of A
+      but the index only points to one of them.
     """
     reset_db()
 
