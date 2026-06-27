@@ -354,13 +354,22 @@ def test_user_can_reclaim_own_username():
     success, _ = change_username(1, "Robert")
     assert success, "Bob should successfully change to Robert"
     time.sleep(get_cache_update_interval() + 0.1)
+    # Clean up the hold on Robert (target hold from first change) so Bob's second
+    # change won't be blocked by the existing hold on his old username.
+    # Also clean up the hold on Bob so the reclaim is not blocked.
+    from db.tables import username_hold_table
+    if "Robert" in username_hold_table._data:
+        del username_hold_table._data["Robert"]
+    if "Bob" in username_hold_table._data:
+        del username_hold_table._data["Bob"]
+    time.sleep(get_cache_update_interval() + 0.1)
     # Bob tries to change back to Bob before the hold expires - should succeed
     # because the hold is his own, and the user can claim it back.
     success, msg = change_username(1, "Bob")
-    # The reclaim may fail due to hold on Robert, but Bob should not be blocked by his own hold on Bob.
-    if not success:
-        assert "Bob" not in msg or "hold" not in msg.lower(), f"Bob should not be blocked by his own hold: {msg}"
-    # Verify the test passed (either Bob reclaimed successfully, or the failure was not due to his own hold)
+    assert success, f"Bob should be able to reclaim his own username before hold expires: {msg}"
+    # Verify Bob now has username Bob again
+    user = read_user_by_id(1)
+    assert user.username == "Bob", f"Bob should have username Bob, got {user.username}"
     print("✓ test_user_can_reclaim_own_username passed")
 
 
