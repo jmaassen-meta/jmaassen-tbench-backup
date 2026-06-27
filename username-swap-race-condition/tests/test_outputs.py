@@ -11,11 +11,13 @@ Verifies that:
 7. Race Condition 1: Simultaneous claim - only one succeeds
 8. Race Condition 2: Hold visibility - user sees A available before hold written
 9. Race Condition 3: Rapid A->B->A with concurrent claim leads to invalid state
+10. Service only uses allowed DB APIs (no direct table access)
 """
 
 import time
 import threading
 import sys
+import ast
 
 # Add site-packages to path so db module can be found when running with uvx
 sys.path.insert(0, "/usr/local/lib/python3.12/site-packages")
@@ -41,6 +43,35 @@ from db.test_helpers import (
     cleanup_test_holds,
 )
 from username_service import change_username
+
+
+def test_service_uses_only_allowed_apis():
+    """Test that the username service only imports from allowed modules."""
+    with open("/app/username_service.py", "r") as f:
+        source = f.read()
+
+    tree = ast.parse(source)
+
+    allowed_modules = {"time", "typing", "db.db_api", "config"}
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                module = alias.name
+                assert module in allowed_modules, (
+                    f"Service imports disallowed module '{module}'. "
+                    f"Allowed modules: {allowed_modules}. "
+                    f"The service can ONLY use the defined APIs in db.db_api, not direct table access."
+                )
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module
+            assert module in allowed_modules, (
+                f"Service imports from disallowed module '{module}'. "
+                f"Allowed modules: {allowed_modules}. "
+                f"The service can ONLY use the defined APIs in db.db_api, not direct table access."
+            )
+
+    print("✓ test_service_uses_only_allowed_apis passed")
 
 
 def reset_db():
@@ -358,6 +389,7 @@ def test_user_can_reclaim_own_username():
     # change won't be blocked by the existing hold on his old username.
     # Also clean up the hold on Bob so the reclaim is not blocked.
     from db.tables import username_hold_table
+
     if "Robert" in username_hold_table._data:
         del username_hold_table._data["Robert"]
     if "Bob" in username_hold_table._data:
@@ -366,7 +398,9 @@ def test_user_can_reclaim_own_username():
     # Bob tries to change back to Bob before the hold expires - should succeed
     # because the hold is his own, and the user can claim it back.
     success, msg = change_username(1, "Bob")
-    assert success, f"Bob should be able to reclaim his own username before hold expires: {msg}"
+    assert success, (
+        f"Bob should be able to reclaim his own username before hold expires: {msg}"
+    )
     # Verify Bob now has username Bob again
     user = read_user_by_id(1)
     assert user.username == "Bob", f"Bob should have username Bob, got {user.username}"
@@ -411,6 +445,7 @@ def test_performance():
 
 
 if __name__ == "__main__":
+    test_service_uses_only_allowed_apis()
     test_basic_username_change()
     test_concurrent_changes_no_race()
     test_hold_expiration_blocking()
