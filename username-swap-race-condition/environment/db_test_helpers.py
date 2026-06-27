@@ -35,9 +35,6 @@ def run_concurrent_claim_race(change_username_fn: Callable) -> List[Tuple[str, b
     """
     Simulate Race Condition 1: Two users try to claim the same available username
     concurrently. Only one should succeed.
-    
-    Hidden implementation: Creates two threads that try to claim "Charlie"
-    at the same time. Returns the results.
     """
     results = []
     
@@ -61,9 +58,6 @@ def run_hold_visibility_race(change_username_fn: Callable) -> List[Tuple[str, bo
     """
     Simulate Race Condition 2: User1 changes A->B while User2 tries to take A.
     User2's cache may not see the hold yet.
-    
-    Hidden implementation: Bob changes to Robert while Alice simultaneously
-    tries to take Bob, without waiting for cache updates.
     """
     results = []
     
@@ -89,9 +83,6 @@ def run_rapid_change_race(change_username_fn: Callable) -> None:
     """
     Simulate Race Condition 3: User1 rapidly changes A->B->A while User2
     tries to take A concurrently.
-    
-    Hidden implementation: Bob rapidly changes Bob->Robert->Bob while Alice
-    tries to take Bob concurrently.
     """
     results = []
     
@@ -116,12 +107,7 @@ def run_rapid_change_race(change_username_fn: Callable) -> None:
 
 
 def setup_dangling_pointer():
-    """
-    Create a dangling pointer scenario.
-    
-    Hidden implementation: Creates a username index entry pointing to user 1,
-    but user 1 has a different username. Returns the time when created.
-    """
+    """Create a dangling pointer scenario. Returns the index entry."""
     username_index_table._data["Dangling"] = UsernameIndexEntry(
         user_id=1, time_created=time.time()
     )
@@ -130,12 +116,7 @@ def setup_dangling_pointer():
 
 
 def cleanup_test_holds():
-    """
-    Clean up holds created during failed attempts.
-    
-    Hidden implementation: Removes all holds except the Bob hold, and deletes
-    the Bob index if it exists, to ensure test isolation.
-    """
+    """Clean up holds created during failed attempts to ensure test isolation."""
     holds_to_remove = [u for u, h in username_hold_table._data.items() if u != "Bob"]
     for u in holds_to_remove:
         del username_hold_table._data[u]

@@ -347,6 +347,23 @@ def test_target_hold_prevents_dangling_race():
     print("✓ test_target_hold_prevents_dangling_race passed")
 
 
+def test_user_can_reclaim_own_username():
+    """Test that a user can reclaim their old username before the hold expires."""
+    reset_db()
+    # Bob changes from Bob to Robert, creating a hold on Bob
+    success, _ = change_username(1, "Robert")
+    assert success, "Bob should successfully change to Robert"
+    time.sleep(get_cache_update_interval() + 0.1)
+    # Bob tries to change back to Bob before the hold expires - should succeed
+    # because the hold is his own, and the user can claim it back.
+    success, msg = change_username(1, "Bob")
+    assert success, f"Bob should be able to reclaim his own username before hold expires: {msg}"
+    # Verify Bob now has username Bob again
+    user = read_user_by_id(1)
+    assert user.username == "Bob", f"Bob should have username Bob, got {user.username}"
+    print("✓ test_user_can_reclaim_own_username passed")
+
+
 def test_performance():
     """
     Performance test: X number of updates must complete within Y seconds.
@@ -393,5 +410,6 @@ if __name__ == "__main__":
     test_race_condition_2_hold_visibility()
     test_race_condition_3_rapid_change_dangling()
     test_target_hold_prevents_dangling_race()
+    test_user_can_reclaim_own_username()
     test_performance()
     print("\n✅ All tests passed!")
