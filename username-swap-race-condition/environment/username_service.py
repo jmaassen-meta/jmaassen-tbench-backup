@@ -1,14 +1,12 @@
 """
-Username service with buggy change_username function.
+Username service with change_username function.
 
-This implementation has race conditions! The 7 steps are not atomic,
-allowing concurrent username changes to interleave and cause:
-- Two users claiming the same username
-- User seeing A available before hold is written (should fail but succeeds)
-- Rapid A->B->A with concurrent claim leading to both users having same username
+This implementation is buggy and has race conditions that can lead to
+violations of the username ownership rules when multiple users change
+usernames concurrently.
 
-The agent must fix this by properly using the atomic_changeset API
-or otherwise making the multi-table updates atomic.
+The agent must fix the race conditions to ensure correct behavior
+under concurrent access.
 """
 
 import time
