@@ -71,6 +71,34 @@ def test_service_uses_only_allowed_apis():
                 f"Allowed modules: {allowed_modules}. "
                 f"The service can ONLY use the defined APIs in db.db_api, not direct table access."
             )
+        elif isinstance(node, ast.Call):
+            # Check for importlib.import_module() or __import__() calls
+            if isinstance(node.func, ast.Attribute):
+                if isinstance(node.func.value, ast.Name):
+                    if (
+                        node.func.value.id == "importlib"
+                        and node.func.attr == "import_module"
+                    ):
+                        raise AssertionError(
+                            "Service uses importlib.import_module() which is not allowed. "
+                            "The service can ONLY use the defined APIs in db.db_api, not direct table access."
+                        )
+            elif isinstance(node.func, ast.Name):
+                if node.func.id == "__import__":
+                    raise AssertionError(
+                        "Service uses __import__() which is not allowed. "
+                        "The service can ONLY use the defined APIs in db.db_api, not direct table access."
+                    )
+
+    # Also check that the source doesn't contain importlib or __import__ strings
+    assert "importlib" not in source, (
+        "Service contains 'importlib' which is not allowed. "
+        "The service can ONLY use the defined APIs in db.db_api."
+    )
+    assert "__import__" not in source, (
+        "Service contains '__import__' which is not allowed. "
+        "The service can ONLY use the defined APIs in db.db_api."
+    )
 
     print("✓ test_service_uses_only_allowed_apis passed")
 
@@ -425,7 +453,9 @@ def test_performance():
 
     # 50 username changes should complete within 10 seconds (lenient threshold to avoid hardware-dependent failures)
     num_updates = 50
-    time_budget = 10.0
+    time_budget = (
+        30.0  # Lenient threshold to avoid hardware-dependent failures on slow CI
+    )
 
     for i in range(num_updates // 3 + 1):
         change_username(1, f"Bob{i}")
