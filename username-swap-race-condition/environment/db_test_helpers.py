@@ -20,6 +20,7 @@ from db.db_api import (
 )
 from db.tables import username_index_table, username_hold_table, user_blob_table
 from db.tables import UsernameIndexEntry
+from db.read_cache import get_client_cache
 
 
 def reset_db_hidden():
@@ -28,7 +29,22 @@ def reset_db_hidden():
     username_hold_table._data.clear()
     user_blob_table._data.clear()
     init_premade_users()
-    time.sleep(get_cache_update_interval() * 2 + 0.1)
+    # Wait for caches to initialize
+    time.sleep(0.1)
+
+
+def force_cache_update():
+    """
+    Force all per-client caches to update from global state.
+    
+    This is a deterministic way to ensure caches have the latest data,
+    instead of relying on time.sleep() which is flaky on slow CI.
+    """
+    # Get the current thread's caches and force them to update
+    from db.read_cache import _thread_local
+    if hasattr(_thread_local, 'caches'):
+        for cache in _thread_local.caches.values():
+            cache._update_from_global()
 
 
 def run_concurrent_claim_race(change_username_fn: Callable) -> List[Tuple[str, bool]]:
@@ -111,7 +127,8 @@ def setup_dangling_pointer():
     username_index_table._data["Dangling"] = UsernameIndexEntry(
         user_id=1, time_created=time.time()
     )
-    time.sleep(get_cache_update_interval() + 0.1)
+    # Force cache update instead of sleeping
+    force_cache_update()
     return read_username_index("Dangling")
 
 
@@ -122,4 +139,4 @@ def cleanup_test_holds():
         del username_hold_table._data[u]
     if "Bob" in username_index_table._data:
         del username_index_table._data["Bob"]
-    time.sleep(get_cache_update_interval() + 0.1)
+    force_cache_update()
