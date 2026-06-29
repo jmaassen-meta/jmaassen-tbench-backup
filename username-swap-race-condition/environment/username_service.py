@@ -30,29 +30,7 @@ from config import HOLD_TIME_SECONDS, DANGLING_POINTER_LOCKOUT
 
 
 def change_username_buggy(user_id: int, target_username: str) -> Tuple[bool, str]:
-    """
-    Change a user's username to the target username.
-
-    BUGGY VERSION - Has race conditions!
-
-    Steps:
-    1. Read current values of target username index and current user blob's username.
-       If target is not different from the current user.username, early return success.
-    2. Create a new username hold for the current/old username with user id and default hold time.
-       If any holds exist for old username, do atomic changeset to delete then create new one.
-    3. Check if allowed to proceed:
-       - If any holds exist for target username, verify they are expired. If expired, they will be deleted in next step.
-       - Check if username index for target points to an id. If not, OK. If yes, check if dangling.
-         If dangling, verify the dangling pointer is older than DANGLING_POINTER_LOCKOUT before allowing claim.
-    4. Delete any expired holds or dangling pointers (can be done concurrently)
-    5. Write new username index for target_username -> user_id
-    6. Update user blob's user.username field to new username
-    7. Delete user's old username -> user_id entry from username index
-
-    Returns:
-        (success, message) tuple
-    """
-    # Step 1: Read current values
+    """Change a user's username to the target username."""
     user = read_user_by_id(user_id)
     if not user:
         return False, "User not found"
@@ -60,7 +38,6 @@ def change_username_buggy(user_id: int, target_username: str) -> Tuple[bool, str
     current_username = user.username
     target_index = read_username_index(target_username)
 
-    # Only early return if user already has the target username AND the index points to this user
     if (
         target_username == current_username
         and target_index is not None
@@ -68,12 +45,12 @@ def change_username_buggy(user_id: int, target_username: str) -> Tuple[bool, str
     ):
         return True, "Already has target username"
 
-    # Step 2: Create hold for old username
     hold_created = create_username_hold(
         current_username, user_id, time.time() + HOLD_TIME_SECONDS
     )
     if not hold_created:
-        # Hold already exists, try atomic delete then create
+        # Hold already exists. Delete the existing hold first, then create a new one.
+        # Do not use atomic changeset with delete+create on the same data.
         existing_hold = read_username_hold(current_username)
         if existing_hold:
             ops = [
@@ -93,36 +70,29 @@ def change_username_buggy(user_id: int, target_username: str) -> Tuple[bool, str
             if not atomic_changeset(ops):
                 return False, "Failed to create hold for old username"
 
-    # Step 3: Check if allowed to proceed
     target_hold = read_username_hold(target_username)
     if target_hold:
-        # Check if hold is expired
         now = time.time()
         if target_hold.time_expired > now:
             return (
                 False,
                 f"Target username has active hold by user {target_hold.user_id}",
             )
-        # Hold is expired, will delete in step 4
 
     dangling_pointer = None
     if target_index:
-        # Check if dangling: user.username != target_username
         target_user = read_user_by_id(target_index.user_id)
         if target_user and target_user.username != target_username:
-            # Dangling pointer detected
             age = time.time() - target_index.time_created
             if age < DANGLING_POINTER_LOCKOUT:
                 return False, "Dangling pointer too recent, lockout period not expired"
             dangling_pointer = target_index
         else:
-            # Not dangling, username actually taken
             return (
                 False,
                 f"Target username already taken by user {target_index.user_id}",
             )
 
-    # Step 4: Delete expired holds or dangling pointers
     if target_hold:
         now = time.time()
         if target_hold.time_expired <= now:
@@ -133,18 +103,15 @@ def change_username_buggy(user_id: int, target_username: str) -> Tuple[bool, str
     if dangling_pointer:
         delete_username_index(target_username, dangling_pointer.user_id)
 
-    # Step 5: Write new username index
     if not create_username_index(target_username, user_id):
         return (
             False,
             "Failed to create username index (race condition: someone else claimed it)",
         )
 
-    # Step 6: Update user blob's username field
     if not update_user_username(user_id, target_username):
         return False, "Failed to update user username"
 
-    # Step 7: Delete old username index entry
     delete_username_index(current_username, user_id)
 
     return (
