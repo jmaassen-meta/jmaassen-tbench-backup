@@ -19,10 +19,10 @@ from db.tables import (
 
 class ReadCache:
     """Per-client per-table read cache."""
-    
+
     # Global flag to disable auto updates for deterministic testing
     _auto_update_enabled = True
-    
+
     def __init__(self, table_name: str, update_interval: float = 0.5):
         self.table_name = table_name
         self.update_interval = update_interval
@@ -30,7 +30,7 @@ class ReadCache:
         self._last_update = 0.0
         self._lock = threading.Lock()
         self._update_from_global()
-    
+
     def _update_from_global(self):
         """Update local cache from global tables. Assumes lock is held."""
         if self.table_name == "username_index":
@@ -40,29 +40,37 @@ class ReadCache:
         elif self.table_name == "user_blob":
             self._cache = user_blob_table.get_all()
         self._last_update = time.time()
-    
+
     def get(self, key: Any) -> Optional[Any]:
         """Get value by key from cache (may be stale)."""
         with self._lock:
-            # Update if auto updates enabled and stale, or if key not found
-            if (ReadCache._auto_update_enabled and 
-                time.time() - self._last_update > self.update_interval) or key not in self._cache:
+            # Update only if auto updates enabled and cache is stale.
+            # Do NOT update just because a key is not found - this is not how a real
+            # read cache behaves. If the cache hasn't refreshed yet, a newly created
+            # key will not be visible until the next refresh. The get() should return
+            # None (stale) rather than triggering a refresh.
+            if (
+                ReadCache._auto_update_enabled
+                and time.time() - self._last_update > self.update_interval
+            ):
                 self._update_from_global()
             return self._cache.get(key)
-    
+
     def get_all(self) -> Dict[Any, Any]:
         """Get all cached entries."""
         with self._lock:
-            if (ReadCache._auto_update_enabled and 
-                time.time() - self._last_update > self.update_interval):
+            if (
+                ReadCache._auto_update_enabled
+                and time.time() - self._last_update > self.update_interval
+            ):
                 self._update_from_global()
             return dict(self._cache)
-    
+
     @classmethod
     def disable_auto_update(cls):
         """Disable automatic cache updates. For deterministic testing."""
         cls._auto_update_enabled = False
-    
+
     @classmethod
     def enable_auto_update(cls):
         """Enable automatic cache updates."""
@@ -70,6 +78,7 @@ class ReadCache:
 
 
 _thread_local = threading.local()
+
 
 def get_client_cache(table_name: str, update_interval: float = 0.5) -> ReadCache:
     """Get or create a per-client per-table read cache."""

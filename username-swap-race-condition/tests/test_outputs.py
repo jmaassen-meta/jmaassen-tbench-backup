@@ -117,6 +117,7 @@ def test_basic_username_change():
     # Bob (id=1) changes from "Bob" to "Robert"
     success, msg = change_username(1, "Robert")
     assert success, f"Change should succeed: {msg}"
+    force_cache_update()
 
     # Verify user blob updated
     user = read_user_by_id(1)
@@ -165,6 +166,7 @@ def test_concurrent_changes_no_race():
 
     # All should succeed (different target usernames)
     assert all(r[2] for r in results), f"All changes should succeed: {results}"
+    force_cache_update()
 
     # Verify no duplicate usernames
     usernames = []
