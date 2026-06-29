@@ -24,41 +24,25 @@ from db.read_cache import get_client_cache, ReadCache
 
 
 def reset_db_hidden():
-    """
-    Reset DB to initial state. Hidden implementation.
-    
-    Goes to manual cache control, forces a refresh with the fresh DB state,
-    then sets back to auto. This ensures the cache has the correct initial
-    state without relying on timing.
-    """
-    from db.read_cache import _thread_local
-    
-    # Go to manual to prevent auto updates during reset
-    ReadCache.disable_auto_update()
-    
-    # Clear all state
+    """Reset DB to initial state. Hidden implementation."""
     username_index_table._data.clear()
     username_hold_table._data.clear()
     user_blob_table._data.clear()
-    
-    # Clear thread-local caches to ensure fresh caches for this test
-    if hasattr(_thread_local, 'caches'):
+    from db.read_cache import _thread_local
+
+    if hasattr(_thread_local, "caches"):
         _thread_local.caches.clear()
-    
-    # Re-initialize the premade users
     init_premade_users()
-    
-    # Force a cache refresh with the fresh DB state (while still in manual mode)
-    force_cache_update()
-    
-    # Set back to auto for normal test execution (unless a specific test disables it)
     ReadCache.enable_auto_update()
+    time.sleep(0.1)
+    force_cache_update()
 
 
 def force_cache_update():
     """Force all per-client caches to update from global state."""
     from db.read_cache import _thread_local
-    if hasattr(_thread_local, 'caches'):
+
+    if hasattr(_thread_local, "caches"):
         for cache in _thread_local.caches.values():
             cache._update_from_global()
 
@@ -74,20 +58,15 @@ def enable_auto_cache():
 
 
 def run_concurrent_1(change_username_fn: Callable) -> List[Tuple[str, bool]]:
-    """
-    Simulate concurrent username claims to the same target.
-    
-    Uses a barrier to ensure both threads start the critical section together,
-    deterministically triggering the race condition.
-    """
+    """Simulate concurrent username claims to the same target."""
     results = []
     barrier = threading.Barrier(2)
-    
+
     def try_claim(uid, target):
         barrier.wait()
         success, msg = change_username_fn(uid, target)
         results.append((uid, success))
-    
+
     threads = [
         threading.Thread(target=try_claim, args=(2, "Charlie")),
         threading.Thread(target=try_claim, args=(3, "Charlie")),
@@ -96,43 +75,32 @@ def run_concurrent_1(change_username_fn: Callable) -> List[Tuple[str, bool]]:
         t.start()
     for t in threads:
         t.join()
-    
+
     return results
 
 
 def run_concurrent_2(change_username_fn: Callable) -> List[Tuple[str, bool]]:
-    """
-    Simulate concurrent changes where one user changes while another tries
-    to claim the old username. The second user's cache may not see the hold yet.
-    """
+    """Simulate concurrent changes where one user changes while another tries to claim."""
     results = []
-    
+
     disable_auto_cache()
-    
-    # Bob changes to Robert, creating hold on Bob in global table
+
     success, msg = change_username_fn(1, "Robert")
     results.append(("Bob", success))
-    
-    # Alice's cache was not updated (auto updates disabled), so she does not see
-    # the hold on Bob or the index change. Her cache still has the old data.
-    # Alice tries to take Bob.
+
     success, msg = change_username_fn(2, "Bob")
     results.append(("Alice", success))
-    
+
     enable_auto_cache()
-    
+
     return results
 
 
 def run_concurrent_3(change_username_fn: Callable) -> None:
-    """
-    Simulate rapid concurrent username changes for consistency verification.
-    
-    Uses a barrier to synchronize the threads at the critical point.
-    """
+    """Simulate rapid concurrent username changes for consistency verification."""
     results = []
     barrier = threading.Barrier(2)
-    
+
     def bob_rapid_changes():
         success1, _ = change_username_fn(1, "Robert")
         results.append(("Bob1", success1))
@@ -140,12 +108,12 @@ def run_concurrent_3(change_username_fn: Callable) -> None:
             barrier.wait()
             success2, _ = change_username_fn(1, "Bob")
             results.append(("Bob2", success2))
-    
+
     def alice_tries():
         barrier.wait()
         success, _ = change_username_fn(2, "Bob")
         results.append(("Alice", success))
-    
+
     t1 = threading.Thread(target=bob_rapid_changes)
     t2 = threading.Thread(target=alice_tries)
     t1.start()
@@ -154,13 +122,80 @@ def run_concurrent_3(change_username_fn: Callable) -> None:
     t2.join()
 
 
+def run_concurrent_reclaim_race(change_username_fn: Callable) -> List[Tuple[str, bool]]:
+    """
+    Simulate a user reclaiming their old username while another user
+    tries to claim it concurrently. The original owner should succeed,
+    the other user should fail.
+    """
+    results = []
+
+    # Bob changes to Robert, creating hold on Bob
+    success, _ = change_username_fn(1, "Robert")
+    results.append(("Bob1", success))
+
+    # Clean up the hold on Robert (target hold from Bob's change) so Bob's
+    # reclaim attempt won't be blocked by the existing hold on his old username.
+    # In a real scenario, the user can reclaim their own username even if the
+    # hold is still active. The test verifies the reclaim logic.
+    if "Robert" in username_hold_table._data:
+        del username_hold_table._data["Robert"]
+
+    # Now Bob tries to reclaim Bob, while Alice simultaneously tries to take Bob
+    barrier = threading.Barrier(2)
+
+    def bob_reclaims():
+        barrier.wait()
+        success, _ = change_username_fn(1, "Bob")
+        results.append(("Bob2", success))
+
+    def alice_tries():
+        barrier.wait()
+        success, _ = change_username_fn(2, "Bob")
+        results.append(("Alice", success))
+
+    t1 = threading.Thread(target=bob_reclaims)
+    t2 = threading.Thread(target=alice_tries)
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+    return results
+
+
+def setup_multiple_dangling_pointers():
+    """
+    Create multiple dangling pointers with different ages.
+
+    Creates three dangling pointers:
+    - "Dangling1": Recent, age < lockout, should NOT be claimable
+    - "Dangling2": Old, age > lockout, should be claimable
+    - "Dangling3": Very old, age >> lockout, should be claimable
+    """
+    now = time.time()
+    lockout = get_dangling_pointer_lockout()
+
+    # Recent dangling pointer - should NOT be claimable (age < lockout)
+    username_index_table._data["Dangling1"] = UsernameIndexEntry(
+        user_id=1,
+        time_created=now - 0.1,  # Very recent
+    )
+    # Old dangling pointer - should be claimable (age > lockout)
+    username_index_table._data["Dangling2"] = UsernameIndexEntry(
+        user_id=2,
+        time_created=now - lockout - 1.0,  # Older than lockout
+    )
+    # Very old dangling pointer - should be claimable (age >> lockout)
+    username_index_table._data["Dangling3"] = UsernameIndexEntry(
+        user_id=3,
+        time_created=now - lockout - 10.0,  # Much older than lockout
+    )
+    force_cache_update()
+
+
 def setup_dangling_pointer():
-    """
-    Create a dangling pointer scenario.
-    
-    Creates a username index entry pointing to user 1, but user 1 has a different
-    username. The dangling pointer is created with the current time.
-    """
+    """Create a dangling pointer scenario. Returns the index entry."""
     username_index_table._data["Dangling"] = UsernameIndexEntry(
         user_id=1, time_created=time.time()
     )
@@ -169,12 +204,9 @@ def setup_dangling_pointer():
 
 
 def setup_expired_hold(username: str):
-    """
-    Create an expired hold for the given username.
-    
-    The hold is created with an expire time in the past, so it is already expired.
-    """
+    """Create an expired hold for the given username."""
     from db.tables import UsernameHoldEntry
+
     now = time.time()
     username_hold_table._data[username] = UsernameHoldEntry(
         user_id=1,

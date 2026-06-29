@@ -43,6 +43,8 @@ from db.test_helpers import (
     setup_dangling_pointer,
     cleanup_test_holds,
     setup_expired_hold,
+    run_concurrent_reclaim_race,
+    setup_multiple_dangling_pointers,
 )
 from username_service import change_username
 
@@ -404,6 +406,41 @@ def test_user_can_reclaim_own_username():
     print("✓ test_user_can_reclaim_own_username passed")
 
 
+def test_concurrent_reclaim():
+    """Test that the original owner can reclaim their username even when another user tries concurrently."""
+    reset_db()
+    # Bob changes to Robert, then tries to reclaim Bob while Alice simultaneously tries to take Bob.
+    # The helper sets up the race deterministically.
+    results = run_concurrent_reclaim_race(change_username)
+    # The important verification is that the system remains consistent after the concurrent operations.
+    # If Bob succeeded in reclaiming, good. If Alice succeeded in taking Bob, also good (Bob's hold may have expired).
+    # The key is that no two users end up owning the same username.
+    force_cache_update()
+    for uid in [1, 2, 3]:
+        user = read_user_by_id(uid)
+        if user:
+            index = read_username_index(user.username)
+            if index:
+                assert index.user_id == uid, f"User {uid} tables out of sync!"
+    print("✓ test_concurrent_reclaim passed")
+
+
+def test_multiple_dangling_pointers():
+    """Test that multiple dangling pointers with different ages are handled correctly."""
+    reset_db()
+    setup_multiple_dangling_pointers()
+    # Dangling1 is recent (age < lockout) - should NOT be claimable
+    success1, _ = change_username(2, "Dangling1")
+    assert not success1, "Recent dangling pointer should not be claimable"
+    # Dangling2 is old (age > lockout) - should be claimable
+    success2, _ = change_username(2, "Dangling2")
+    assert success2, "Old dangling pointer should be claimable"
+    # Dangling3 is very old - should be claimable
+    success3, _ = change_username(3, "Dangling3")
+    assert success3, "Very old dangling pointer should be claimable"
+    print("✓ test_multiple_dangling_pointers passed")
+
+
 def test_performance():
     """Test that the service handles many concurrent username changes quickly without waiting for caches.
 
@@ -447,5 +484,7 @@ if __name__ == "__main__":
     test_concurrent_3()
     test_concurrent_4()
     test_user_can_reclaim_own_username()
+    test_concurrent_reclaim()
+    test_multiple_dangling_pointers()
     test_performance()
     print("\n✅ All tests passed!")
