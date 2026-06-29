@@ -37,9 +37,9 @@ from db.tables import username_index_table, username_hold_table, user_blob_table
 from db.test_helpers import (
     force_cache_update,
     reset_db_hidden,
-    run_concurrent_claim_race,
-    run_hold_visibility_race,
-    run_rapid_change_race,
+    run_concurrent_1,
+    run_concurrent_2,
+    run_concurrent_3,
     setup_dangling_pointer,
     cleanup_test_holds,
     setup_expired_hold,
@@ -257,7 +257,7 @@ def test_dangling_pointer_lockout():
     print("✓ test_dangling_pointer_lockout passed")
 
 
-def test_race_condition_1_simultaneous_claim():
+def test_concurrent_1():
     """
     Race Condition 1: When 2+ people try to update to the same available username
     at the same time, only 1 should succeed, others should get fail response.
@@ -297,10 +297,10 @@ def test_race_condition_1_simultaneous_claim():
 
     assert charlie_count == 1, f"Only one user should have Charlie, got {charlie_count}"
 
-    print("✓ test_race_condition_1_simultaneous_claim passed")
+    print("✓ test_concurrent_1 passed")
 
 
-def test_race_condition_2_hold_visibility():
+def test_concurrent_2():
     """
     Race Condition 2: If user1 changes from A to B and user2 changes from C to A,
     user2 might see A available before they see the hold is written, so it goes
@@ -309,17 +309,17 @@ def test_race_condition_2_hold_visibility():
     This test uses concurrent threads to trigger the race.
     """
     reset_db()
-    results = run_hold_visibility_race(change_username)
+    results = run_concurrent_2(change_username)
     bob_result = [r for r in results if r[0] == "Bob"][0]
     assert bob_result[1], "Bob should successfully change to Robert"
     alice_result = [r for r in results if r[0] == "Alice"][0]
     assert not alice_result[1], (
         f"Alice should not be able to take Bob due to hold, but she succeeded"
     )
-    print("✓ test_race_condition_2_hold_visibility passed")
+    print("✓ test_concurrent_2 passed")
 
 
-def test_race_condition_3_rapid_change_dangling():
+def test_concurrent_3():
     """
     Race Condition 3: If user1 rapidly changes A->B->A, and user2 tries to change
     to A at the same time, user2 might see no hold yet and see user1's username
@@ -330,7 +330,7 @@ def test_race_condition_3_rapid_change_dangling():
     This test uses concurrent threads to trigger the race.
     """
     reset_db()
-    run_rapid_change_race(change_username)
+    run_concurrent_3(change_username)
     force_cache_update()
     for uid in [1, 2, 3]:
         user = read_user_by_id(uid)
@@ -343,10 +343,10 @@ def test_race_condition_3_rapid_change_dangling():
             f"User {uid} has username '{user.username}' but index points to "
             f"user {index.user_id}. Tables out of sync! Race condition occurred."
         )
-    print("✓ test_race_condition_3_rapid_change_dangling passed")
+    print("✓ test_concurrent_3 passed")
 
 
-def test_target_hold_prevents_dangling_race():
+def test_concurrent_4():
     """
     Test that the dangling pointer race condition is prevented.
 
@@ -403,7 +403,7 @@ def test_target_hold_prevents_dangling_race():
         f"Alice should not have username Bob, got {alice.username}"
     )
 
-    print("✓ test_target_hold_prevents_dangling_race passed")
+    print("✓ test_concurrent_4 passed")
 
 
 def test_user_can_reclaim_own_username():
@@ -413,7 +413,7 @@ def test_user_can_reclaim_own_username():
     success, _ = change_username(1, "Robert")
     assert success, "Bob should successfully change to Robert"
     time.sleep(get_cache_update_interval() + 0.1)
-    # Clean up the hold on Robert (target hold from first change) so Bob's second
+    # Clean up the hold on Robert from first change so Bob's second
     # change won't be blocked by the existing hold on his old username.
     # Also clean up the hold on Bob so the reclaim is not blocked.
     from db.tables import username_hold_table
@@ -479,10 +479,10 @@ if __name__ == "__main__":
     test_concurrent_changes_no_race()
     test_hold_expiration_blocking()
     test_dangling_pointer_lockout()
-    test_race_condition_1_simultaneous_claim()
-    test_race_condition_2_hold_visibility()
-    test_race_condition_3_rapid_change_dangling()
-    test_target_hold_prevents_dangling_race()
+    test_concurrent_1()
+    test_concurrent_2()
+    test_concurrent_3()
+    test_concurrent_4()
     test_user_can_reclaim_own_username()
     test_performance()
     print("\n✅ All tests passed!")

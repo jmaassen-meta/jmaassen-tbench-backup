@@ -55,9 +55,9 @@ def enable_auto_cache():
     ReadCache.enable_auto_update()
 
 
-def run_concurrent_claim_race(change_username_fn: Callable) -> List[Tuple[str, bool]]:
+def run_concurrent_1(change_username_fn: Callable) -> List[Tuple[str, bool]]:
     """
-    Simulate Race Condition 1: Two users try to claim the same available username
+    Simulate concurrent username claims.
     concurrently. Only one should succeed.
     """
     results = []
@@ -80,9 +80,9 @@ def run_concurrent_claim_race(change_username_fn: Callable) -> List[Tuple[str, b
     return results
 
 
-def run_hold_visibility_race(change_username_fn: Callable) -> List[Tuple[str, bool]]:
+def run_concurrent_2(change_username_fn: Callable) -> List[Tuple[str, bool]]:
     """
-    Simulate Race Condition 2: User1 changes A->B while User2 tries to take A.
+    Simulate concurrent changes where one user changes while another tries to claim.
     User2's cache may not see the hold yet.
     
     Deterministic setup:
@@ -112,9 +112,9 @@ def run_hold_visibility_race(change_username_fn: Callable) -> List[Tuple[str, bo
     return results
 
 
-def run_rapid_change_race(change_username_fn: Callable) -> None:
+def run_concurrent_3(change_username_fn: Callable) -> None:
     """
-    Simulate Race Condition 3: User1 rapidly changes A->B->A while User2
+    Simulate rapid concurrent username changes.
     tries to take A concurrently.
     
     Uses a barrier to ensure the threads start the critical operations together,
