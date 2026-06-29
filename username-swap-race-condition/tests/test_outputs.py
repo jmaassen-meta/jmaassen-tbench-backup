@@ -106,12 +106,8 @@ def test_service_uses_only_allowed_apis():
 
 def reset_db():
     """Reset DB to initial state with premade users."""
-    username_index_table._data.clear()
-    username_hold_table._data.clear()
-    user_blob_table._data.clear()
-    init_premade_users()
-    # Wait for caches to update
-    time.sleep(get_cache_update_interval() * 2 + 0.1)
+    reset_db_hidden()
+    force_cache_update()
 
 
 def test_basic_username_change():
@@ -203,6 +199,7 @@ def test_hold_expiration_blocking():
     # Manually delete the Bob hold so Alice can claim Bob without needing to delete the expired hold.
     # This makes the test deterministic and avoids issues with hold expiration timing.
     from db.tables import username_hold_table
+
     if "Bob" in username_hold_table._data:
         del username_hold_table._data["Bob"]
     force_cache_update()
@@ -229,7 +226,7 @@ def test_dangling_pointer_lockout():
 
     # Wait just enough for cache to update, but not so long that lockout expires
     # Lockout is 1.0s, so wait 0.6s to ensure age < lockout
-    time.sleep(get_cache_update_interval() + 0.1)
+    force_cache_update()
 
     # Verify the dangling pointer is visible in cache and age < lockout
     dangling_index = read_username_index("Dangling")
@@ -370,7 +367,7 @@ def test_concurrent_4():
 
     # Wait for Bob's user.blob to update in cache, but not the index or hold
     # (simulates the race condition where user.blob updates before index/hold)
-    time.sleep(get_cache_update_interval() + 0.1)
+    force_cache_update()
 
     # At this point, a buggy client might see:
     # - Bob's user.blob username = "Robert" (updated)
@@ -412,7 +409,7 @@ def test_user_can_reclaim_own_username():
     # Bob changes from Bob to Robert, creating a hold on Bob
     success, _ = change_username(1, "Robert")
     assert success, "Bob should successfully change to Robert"
-    time.sleep(get_cache_update_interval() + 0.1)
+    force_cache_update()
     # Clean up the hold on Robert from first change so Bob's second
     # change won't be blocked by the existing hold on his old username.
     # Also clean up the hold on Bob so the reclaim is not blocked.
@@ -422,7 +419,7 @@ def test_user_can_reclaim_own_username():
         del username_hold_table._data["Robert"]
     if "Bob" in username_hold_table._data:
         del username_hold_table._data["Bob"]
-    time.sleep(get_cache_update_interval() + 0.1)
+    force_cache_update()
     # Bob tries to change back to Bob before the hold expires - should succeed
     # because the hold is his own, and the user can claim it back.
     success, msg = change_username(1, "Bob")
