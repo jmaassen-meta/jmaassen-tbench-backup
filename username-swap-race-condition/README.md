@@ -13,7 +13,7 @@ The service must use the atomic changeset API to make multi-table updates atomic
 ## Completion Rates
 - Oracle: 3/3 passed (100%)
 - Sonnet 4.6: 4/5 passed (80%)
-- Opus 4.6: 0/5 passed (0%) - Task is challenging for Opus, all runs failed to correctly handle the race conditions
+- Opus 4.6: 4/5 passed (80%)
 - Avocado: 4/5 passed (80%)
 
 ## Model Analysis
@@ -23,12 +23,10 @@ The service must use the atomic changeset API to make multi-table updates atomic
 - 1 trial failed because the agent did not properly clean up the old username hold on failure. When a change fails after creating the old hold, the hold remains and blocks future attempts by the same user. The agent's solution did not delete the old hold before returning False in step 3, leaving a leftover hold on the user's old username.
 - The failure reflects a reasoning gap about resource cleanup on failure paths, not a task setup issue.
 
-**Opus 4.6: 0/5 passed**
-- All 5 trials failed to correctly handle the race conditions.
-- Common failure modes:
-  - 3/5 failed because the agent did not use the atomic changeset at all, leaving steps 4-7 non-atomic. Concurrent operations interleaved, causing both users to end up with the same username or the tables to go out of sync.
-  - 2/5 failed because the agent used the atomic changeset but did not create a target hold. The agent correctly wrapped the multi-table updates in a changeset, but did not realize that a target hold is needed to prevent the dangling pointer race where a claimer sees a dangling pointer but not the hold. Without the target hold, the dangling pointer race still occurs.
-- The failures reflect reasoning gaps about the need for atomicity across multiple tables and the subtle dangling pointer race condition that requires a target hold, not task setup issues.
+**Opus 4.6: 4/5 passed**
+- 4 trials passed by correctly using the atomic changeset API and creating a target hold to prevent the dangling pointer race.
+- 1 trial failed because the agent did not use the atomic changeset at all, leaving steps 4-7 non-atomic. Concurrent operations interleaved, causing the tables to go out of sync.
+- The failure reflects a reasoning gap about the need for atomicity across multiple tables, not a task setup issue.
 
 **Avocado: 4/5 passed**
 - 4 trials passed by correctly implementing the target hold fix and using the atomic changeset properly.
@@ -36,8 +34,7 @@ The service must use the atomic changeset API to make multi-table updates atomic
 - The failure reflects a reasoning gap about the need for precise hold expire time matching when deleting holds, not a task setup issue.
 
 **Failure categorization across all models:**
-- **Missing atomic changeset**: 3 failures (Opus) - Agent did not wrap steps 4-7 in an atomic changeset, leaving the multi-table updates vulnerable to interleaving.
-- **Missing target hold**: 2 failures (Opus) - Agent used atomic changeset but did not create a target hold, leaving the dangling pointer race unhandled.
+- **Missing atomic changeset**: 1 failure (Opus) - Agent did not wrap steps 4-7 in an atomic changeset, leaving the multi-table updates vulnerable to interleaving.
 - **Incorrect hold expire time**: 1 failure (Avocado) - Agent used calculated time instead of actual hold time_expired when deleting, causing the delete to not match.
 - **Missing hold cleanup**: 1 failure (Sonnet) - Agent did not clean up the old username hold on failure, leaving a leftover hold that blocked future attempts.
 
