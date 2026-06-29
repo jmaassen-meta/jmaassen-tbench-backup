@@ -2,8 +2,8 @@
 Test helper functions for simulating race conditions.
 
 These functions are hidden from the agent (in the protected db package).
-They set up specific race scenarios by manually controlling cache update order.
-The tests call these helpers without revealing the implementation details.
+They set up specific race scenarios by manually controlling cache update order
+and DB state. The tests call these helpers without revealing the implementation.
 """
 
 import time
@@ -19,7 +19,7 @@ from db.db_api import (
     get_dangling_pointer_lockout,
 )
 from db.tables import username_index_table, username_hold_table, user_blob_table
-from db.tables import UsernameIndexEntry
+from db.tables import UsernameIndexEntry, UsernameHoldEntry
 from db.read_cache import get_client_cache, ReadCache
 
 
@@ -28,12 +28,10 @@ def reset_db_hidden():
     username_index_table._data.clear()
     username_hold_table._data.clear()
     user_blob_table._data.clear()
-    # Clear thread-local caches
     from db.read_cache import _thread_local
     if hasattr(_thread_local, 'caches'):
         _thread_local.caches.clear()
     init_premade_users()
-    # Enable auto updates by default, then force initial update
     ReadCache.enable_auto_update()
     time.sleep(0.1)
     force_cache_update()
@@ -61,13 +59,12 @@ def run_concurrent_claim_race(change_username_fn: Callable) -> List[Tuple[str, b
     """
     Simulate Race Condition 1: Two users try to claim the same available username
     concurrently. Only one should succeed.
-    
-    Uses concurrent threads to trigger the race. The OS thread scheduler
-    determines the order, making the race realistic.
     """
     results = []
+    barrier = threading.Barrier(2)
     
     def try_claim(uid, target):
+        barrier.wait()  # Ensure both threads start the critical section together
         success, msg = change_username_fn(uid, target)
         results.append((uid, success))
     
@@ -88,45 +85,28 @@ def run_hold_visibility_race(change_username_fn: Callable) -> List[Tuple[str, bo
     Simulate Race Condition 2: User1 changes A->B while User2 tries to take A.
     User2's cache may not see the hold yet.
     
-    Deterministic setup using manual cache control:
+    Deterministic setup:
     1. Disable auto cache updates
     2. Bob changes to Robert, creating hold on Bob in global table
-    3. Manually update Bob's user.blob cache but NOT the username index or hold caches
-       (simulating the race where user.blob updates before index/hold)
-    4. Alice tries to take Bob. Her cache does not see the hold on Bob or the index
-       change, so she thinks Bob is available.
+    3. Alice's cache is not updated, so she does not see the hold on Bob or the index change
+    4. Alice tries to take Bob. Her stale cache thinks Bob is available.
     5. The fixed version should prevent Alice by creating a target hold on Bob,
        which will fail because the hold already exists in the global table.
     """
     results = []
     
-    # Disable auto updates for deterministic control
     disable_auto_cache()
     
     # Bob changes to Robert, creating hold on Bob in global table
     success, msg = change_username_fn(1, "Robert")
     results.append(("Bob", success))
     
-    # Manually control cache updates to simulate the race:
-    # - Update the user.blob cache so Alice sees Bob's username as "Robert"
-    # - Do NOT update the username index cache, so Alice still sees Bob index pointing to user 1
-    # - Do NOT update the hold cache, so Alice does not see the hold on Bob
-    
-    # Get Alice's caches (current thread's caches, since we're not using threads for deterministic setup)
-    # Actually, the change_username_fn runs in the current thread, so the caches are for the current thread.
-    # We need to simulate Alice having a different cache state than Bob.
-    # 
-    # For simplicity, we just call Alice's attempt directly. Her cache may not have the
-    # Bob hold or the index change yet, depending on when her cache was last updated.
-    # The force_cache_update() in reset_db_hidden ensures the cache is fresh at the start.
-    # After Bob's change, the global tables are updated but the cache is not (auto updates disabled).
-    # So Alice's cache still has the old data (Bob username = "Bob", Bob index points to 1, no hold on Bob).
-    
-    # Alice tries to take Bob. Her cache does not see the hold or the index change.
+    # Alice's cache was not updated (auto updates disabled), so she does not see
+    # the hold on Bob or the index change. Her cache still has the old data.
+    # Alice tries to take Bob.
     success, msg = change_username_fn(2, "Bob")
     results.append(("Alice", success))
     
-    # Re-enable auto updates
     enable_auto_cache()
     
     return results
@@ -137,19 +117,22 @@ def run_rapid_change_race(change_username_fn: Callable) -> None:
     Simulate Race Condition 3: User1 rapidly changes A->B->A while User2
     tries to take A concurrently.
     
-    Uses concurrent threads to trigger the race.
+    Uses a barrier to ensure the threads start the critical operations together,
+    making the race more likely to trigger.
     """
     results = []
+    barrier = threading.Barrier(2)
     
     def bob_rapid_changes():
         success1, _ = change_username_fn(1, "Robert")
         results.append(("Bob1", success1))
         if success1:
+            barrier.wait()  # Sync with Alice before the second change
             success2, _ = change_username_fn(1, "Bob")
             results.append(("Bob2", success2))
     
     def alice_tries():
-        time.sleep(0.05)
+        barrier.wait()  # Sync with Bob before trying to take Bob
         success, _ = change_username_fn(2, "Bob")
         results.append(("Alice", success))
     
@@ -166,14 +149,30 @@ def setup_dangling_pointer():
     Create a dangling pointer scenario.
     
     Creates a username index entry pointing to user 1, but user 1 has a different
-    username. The dangling pointer is created with the current time, so its age
-    will be less than the lockout period when the test runs immediately after.
+    username. The dangling pointer is created with a recent time so its age will
+    be less than the lockout period.
     """
     username_index_table._data["Dangling"] = UsernameIndexEntry(
         user_id=1, time_created=time.time()
     )
     force_cache_update()
     return read_username_index("Dangling")
+
+
+def setup_expired_hold(username: str):
+    """
+    Create an expired hold for the given username.
+    
+    The hold is created with an expire time in the past, so it is already expired.
+    This allows deterministic testing of expired hold handling without waiting.
+    """
+    now = time.time()
+    username_hold_table._data[username] = UsernameHoldEntry(
+        user_id=1,
+        time_created=now - 10,
+        time_expired=now - 5,  # Expired 5 seconds ago
+    )
+    force_cache_update()
 
 
 def cleanup_test_holds():

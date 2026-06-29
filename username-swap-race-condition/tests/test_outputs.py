@@ -42,6 +42,7 @@ from db.test_helpers import (
     run_rapid_change_race,
     setup_dangling_pointer,
     cleanup_test_holds,
+    setup_expired_hold,
 )
 from username_service import change_username
 
@@ -199,18 +200,10 @@ def test_hold_expiration_blocking():
         f"Alice should not be able to take Bob before hold expires: {msg}"
     )
 
-    # Wait for hold to expire
-    time.sleep(get_hold_time_seconds() + 0.5)
-    force_cache_update()
-
+    # Manually set the Bob hold to be expired (deterministic, no waiting)
+    setup_expired_hold("Bob")
     # Clean up any holds created during the failed attempt to ensure test isolation.
     cleanup_test_holds()
-    # Also delete the Bob hold so Alice's create will succeed without needing to delete the expired hold.
-    from db.tables import username_hold_table
-
-    if "Bob" in username_hold_table._data:
-        del username_hold_table._data["Bob"]
-    time.sleep(get_cache_update_interval() + 0.1)
 
     # Alice tries again after hold expires - should succeed
     success, msg = change_username(2, "Bob")
