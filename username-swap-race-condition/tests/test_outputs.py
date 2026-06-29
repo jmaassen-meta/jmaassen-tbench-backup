@@ -204,6 +204,7 @@ def test_hold_expiration_blocking():
     cleanup_test_holds()
     # Also delete the Bob hold so Alice&apos;s create will succeed without needing to delete the expired hold.
     from db.tables import username_hold_table
+
     if "Bob" in username_hold_table._data:
         del username_hold_table._data["Bob"]
     force_cache_update()
@@ -414,14 +415,24 @@ def test_performance():
     start = time.time()
     # 50 username changes should complete quickly without waiting for caches.
     num_updates = 50
+    time_budget = (
+        60.0  # Very generous budget to avoid hardware-dependent failures on slow CI.
+    )
+    # A correct solution should complete in under 2-3 seconds. A solution that waits
+    # for cache intervals (0.5s) between each operation would take 25+ seconds.
+    # A solution that waits for holds to expire (3s) would take 150+ seconds.
+    # The 60s budget is very lenient and should not cause false negatives, but will
+    # catch solutions that take an unreasonably long time by waiting for caches.
     for i in range(num_updates // 3 + 1):
         change_username(1, f"Bob{i}")
         change_username(2, f"Alice{i}")
         change_username(3, f"Tom{i}")
     elapsed = time.time() - start
-    # Just verify the operations complete without hanging.
-    # A solution that waits for caches would take 50+ seconds and may time out.
-    # We don't enforce a strict time budget to avoid hardware-dependent failures on slow CI.
+    assert elapsed < time_budget, (
+        f"{num_updates} updates took {elapsed:.2f}s, should be < {time_budget}s. "
+        f"Solution may be waiting for caches instead of handling concurrency properly. "
+        f"A correct solution should complete in under a few seconds."
+    )
     print(f"✓ test_performance passed ({elapsed:.2f}s for {num_updates} updates)")
 
 
