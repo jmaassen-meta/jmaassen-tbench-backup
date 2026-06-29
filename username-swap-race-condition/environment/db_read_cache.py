@@ -3,6 +3,7 @@ Read Cache simulating distributed read shards.
 
 Each client gets its own ReadCache instance per table.
 Cache updates periodically from global state, simulating eventual consistency.
+Tests can disable auto updates and manually control cache refresh order.
 """
 
 import time
@@ -18,6 +19,9 @@ from db.tables import (
 
 class ReadCache:
     """Per-client per-table read cache."""
+    
+    # Global flag to disable auto updates for deterministic testing
+    _auto_update_enabled = True
     
     def __init__(self, table_name: str, update_interval: float = 0.5):
         self.table_name = table_name
@@ -40,17 +44,29 @@ class ReadCache:
     def get(self, key: Any) -> Optional[Any]:
         """Get value by key from cache (may be stale)."""
         with self._lock:
-            # Update if stale, or if key not found (to see recent writes)
-            if time.time() - self._last_update > self.update_interval or key not in self._cache:
+            # Update if auto updates enabled and stale, or if key not found
+            if (ReadCache._auto_update_enabled and 
+                time.time() - self._last_update > self.update_interval) or key not in self._cache:
                 self._update_from_global()
             return self._cache.get(key)
     
     def get_all(self) -> Dict[Any, Any]:
         """Get all cached entries."""
         with self._lock:
-            if time.time() - self._last_update > self.update_interval:
+            if (ReadCache._auto_update_enabled and 
+                time.time() - self._last_update > self.update_interval):
                 self._update_from_global()
             return dict(self._cache)
+    
+    @classmethod
+    def disable_auto_update(cls):
+        """Disable automatic cache updates. For deterministic testing."""
+        cls._auto_update_enabled = False
+    
+    @classmethod
+    def enable_auto_update(cls):
+        """Enable automatic cache updates."""
+        cls._auto_update_enabled = True
 
 
 _thread_local = threading.local()
