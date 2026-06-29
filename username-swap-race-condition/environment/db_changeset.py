@@ -50,12 +50,20 @@ class AtomicChangeset:
         """
         # Check for delete/create of the same data in the same changeset
         # This is not allowed in a real prod setting.
+        # For holds, the hold_expire_time is included in the args key, so delete/create
+        # with different expire times is allowed (e.g., to refresh/extend the hold time
+        # after a re-claim). If the expire times are the same, it's blocked.
         seen_args = set()
         for op in self.operations:
             if op["op"] in ("create_username_index", "delete_username_index"):
                 args_key = ("username_index", op["username"], op["user_id"])
             elif op["op"] in ("create_username_hold", "delete_username_hold"):
-                args_key = ("username_hold", op["username"], op["user_id"])
+                args_key = (
+                    "username_hold",
+                    op["username"],
+                    op["user_id"],
+                    op["hold_expire_time"],
+                )
             elif op["op"] == "update_user_username":
                 args_key = ("user_blob", op["user_id"])
             else:
