@@ -337,13 +337,15 @@ def test_race_condition_3_rapid_change_dangling():
     force_cache_update()
     for uid in [1, 2, 3]:
         user = read_user_by_id(uid)
-        if user:
-            index = read_username_index(user.username)
-            if index:
-                assert index.user_id == uid, (
-                    f"User {uid} has username '{user.username}' but index points to "
-                    f"user {index.user_id}. Tables out of sync! Race condition occurred."
-                )
+        assert user is not None, f"User {uid} should exist"
+        index = read_username_index(user.username)
+        assert index is not None, (
+            f"User {uid} with username '{user.username}' should have an index entry"
+        )
+        assert index.user_id == uid, (
+            f"User {uid} has username '{user.username}' but index points to "
+            f"user {index.user_id}. Tables out of sync! Race condition occurred."
+        )
     print("✓ test_race_condition_3_rapid_change_dangling passed")
 
 
