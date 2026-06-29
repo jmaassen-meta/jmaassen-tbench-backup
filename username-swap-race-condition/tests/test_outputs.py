@@ -8,9 +8,9 @@ Verifies that:
 4. Username holds properly block claims
 5. Dangling pointers are handled correctly with lockout period
 6. Performance: multiple updates complete within time budget
-7. Race Condition 1: Simultaneous claim - only one succeeds
-8. Race Condition 2: Hold visibility - user sees A available before hold written
-9. Race Condition 3: Rapid A->B->A with concurrent claim leads to invalid state
+7. Concurrent operations handle simultaneous claims correctly
+8. Concurrent operations handle hold visibility correctly
+9. Concurrent operations maintain consistency under rapid changes
 10. Service only uses allowed DB APIs (no direct table access)
 """
 
@@ -257,10 +257,7 @@ def test_dangling_pointer_lockout():
 
 
 def test_concurrent_1():
-    """
-    Race Condition 1: When 2+ people try to update to the same available username
-    at the same time, only 1 should succeed, others should get fail response.
-    """
+    """Test concurrent username claims to the same target."""
     reset_db()
 
     results = []
@@ -300,13 +297,7 @@ def test_concurrent_1():
 
 
 def test_concurrent_2():
-    """
-    Race Condition 2: If user1 changes from A to B and user2 changes from C to A,
-    user2 might see A available before they see the hold is written, so it goes
-    through but should fail due to hold.
-
-    This test uses concurrent threads to trigger the race.
-    """
+    """Test concurrent changes where one user changes while another tries to claim."""
     reset_db()
     results = run_concurrent_2(change_username)
     bob_result = [r for r in results if r[0] == "Bob"][0]
@@ -319,15 +310,7 @@ def test_concurrent_2():
 
 
 def test_concurrent_3():
-    """
-    Race Condition 3: If user1 rapidly changes A->B->A, and user2 tries to change
-    to A at the same time, user2 might see no hold yet and see user1's username
-    as B before the lookup has changed, so dangling pointer logic lets it take A.
-    This leads to invalid state where both user1 and user2 have user.username of A
-    but lookup only points to user2.
-
-    This test uses concurrent threads to trigger the race.
-    """
+    """Test rapid concurrent username changes for consistency."""
     reset_db()
     run_concurrent_3(change_username)
     force_cache_update()
@@ -346,21 +329,7 @@ def test_concurrent_3():
 
 
 def test_concurrent_4():
-    """
-    Test that the dangling pointer race condition is prevented.
-
-    Scenario:
-    - User1 changes A->B, creating hold on A, updating index, updating user.blob
-    - User2's cache sees user1's user.blob as B (updated) before seeing the index
-      change (A still points to user1) and before seeing the hold on A.
-    - User2 sees A index pointing to user1, but user1's username is B, so it's a
-      dangling pointer. If the dangling pointer is older than lockout, user2
-      deletes it and takes A.
-    - But user1 just created a hold on A, which user2 couldn't see yet.
-    - This should not lead to both users owning A. The service must prevent
-      the invalid state where both user1 and user2 have user.username of A
-      but the index only points to one of them.
-    """
+    """Test that concurrent operations maintain consistency across all tables."""
     reset_db()
 
     # Bob changes Bob -> Robert, creating hold on Bob
