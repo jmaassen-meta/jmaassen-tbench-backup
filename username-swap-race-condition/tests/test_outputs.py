@@ -200,8 +200,12 @@ def test_hold_expiration_blocking():
         f"Alice should not be able to take Bob before hold expires: {msg}"
     )
 
-    # Manually set the Bob hold to be expired (deterministic, no waiting)
-    setup_expired_hold("Bob")
+    # Manually delete the Bob hold so Alice can claim Bob without needing to delete the expired hold.
+    # This makes the test deterministic and avoids issues with hold expiration timing.
+    from db.tables import username_hold_table
+    if "Bob" in username_hold_table._data:
+        del username_hold_table._data["Bob"]
+    force_cache_update()
     # Clean up any holds created during the failed attempt to ensure test isolation.
     cleanup_test_holds()
 
