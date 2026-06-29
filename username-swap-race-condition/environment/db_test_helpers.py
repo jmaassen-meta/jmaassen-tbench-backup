@@ -19,7 +19,7 @@ from db.db_api import (
     get_dangling_pointer_lockout,
 )
 from db.tables import username_index_table, username_hold_table, user_blob_table
-from db.tables import UsernameIndexEntry, UsernameHoldEntry
+from db.tables import UsernameIndexEntry
 from db.read_cache import get_client_cache, ReadCache
 
 
@@ -57,14 +57,16 @@ def enable_auto_cache():
 
 def run_concurrent_1(change_username_fn: Callable) -> List[Tuple[str, bool]]:
     """
-    Simulate concurrent username claims.
-    concurrently. Only one should succeed.
+    Simulate concurrent username claims to the same target.
+    
+    Uses a barrier to ensure both threads start the critical section together,
+    deterministically triggering the race condition.
     """
     results = []
     barrier = threading.Barrier(2)
     
     def try_claim(uid, target):
-        barrier.wait()  # Ensure both threads start the critical section together
+        barrier.wait()
         success, msg = change_username_fn(uid, target)
         results.append((uid, success))
     
@@ -82,16 +84,8 @@ def run_concurrent_1(change_username_fn: Callable) -> List[Tuple[str, bool]]:
 
 def run_concurrent_2(change_username_fn: Callable) -> List[Tuple[str, bool]]:
     """
-    Simulate concurrent changes where one user changes while another tries to claim.
-    User2's cache may not see the hold yet.
-    
-    Deterministic setup:
-    1. Disable auto cache updates
-    2. Bob changes to Robert, creating hold on Bob in global table
-    3. Alice's cache is not updated, so she does not see the hold on Bob or the index change
-    4. Alice tries to take Bob. Her stale cache thinks Bob is available.
-    5. The fixed version should prevent Alice by creating a target hold on Bob,
-       which will fail because the hold already exists in the global table.
+    Simulate concurrent changes where one user changes while another tries
+    to claim the old username. The second user's cache may not see the hold yet.
     """
     results = []
     
@@ -114,11 +108,9 @@ def run_concurrent_2(change_username_fn: Callable) -> List[Tuple[str, bool]]:
 
 def run_concurrent_3(change_username_fn: Callable) -> None:
     """
-    Simulate rapid concurrent username changes.
-    tries to take A concurrently.
+    Simulate rapid concurrent username changes for consistency verification.
     
-    Uses a barrier to ensure the threads start the critical operations together,
-    making the race more likely to trigger.
+    Uses a barrier to synchronize the threads at the critical point.
     """
     results = []
     barrier = threading.Barrier(2)
@@ -127,12 +119,12 @@ def run_concurrent_3(change_username_fn: Callable) -> None:
         success1, _ = change_username_fn(1, "Robert")
         results.append(("Bob1", success1))
         if success1:
-            barrier.wait()  # Sync with Alice before the second change
+            barrier.wait()
             success2, _ = change_username_fn(1, "Bob")
             results.append(("Bob2", success2))
     
     def alice_tries():
-        barrier.wait()  # Sync with Bob before trying to take Bob
+        barrier.wait()
         success, _ = change_username_fn(2, "Bob")
         results.append(("Alice", success))
     
@@ -149,8 +141,7 @@ def setup_dangling_pointer():
     Create a dangling pointer scenario.
     
     Creates a username index entry pointing to user 1, but user 1 has a different
-    username. The dangling pointer is created with a recent time so its age will
-    be less than the lockout period.
+    username. The dangling pointer is created with the current time.
     """
     username_index_table._data["Dangling"] = UsernameIndexEntry(
         user_id=1, time_created=time.time()
@@ -164,13 +155,13 @@ def setup_expired_hold(username: str):
     Create an expired hold for the given username.
     
     The hold is created with an expire time in the past, so it is already expired.
-    This allows deterministic testing of expired hold handling without waiting.
     """
+    from db.tables import UsernameHoldEntry
     now = time.time()
     username_hold_table._data[username] = UsernameHoldEntry(
         user_id=1,
         time_created=now - 10,
-        time_expired=now - 5,  # Expired 5 seconds ago
+        time_expired=now - 5,
     )
     force_cache_update()
 
