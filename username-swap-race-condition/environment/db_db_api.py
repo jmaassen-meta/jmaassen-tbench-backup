@@ -8,7 +8,6 @@ All write operations go to the global instance with per-pkey locking (strong con
 from typing import Optional, List, Dict, Any
 
 from db.tables import User, UsernameIndexEntry, UsernameHoldEntry
-from db.tables import username_index_table, username_hold_table, user_blob_table
 from db.read_cache import get_client_cache
 from db.changeset import atomic_changeset as _atomic_changeset
 
@@ -65,6 +64,7 @@ def create_username_index(username: str, user_id: int) -> bool:
     Returns:
         True if created successfully, False if username already exists
     """
+    from db.tables import username_index_table
     return username_index_table.create(username, user_id)
 
 
@@ -79,6 +79,7 @@ def delete_username_index(username: str, user_id: int) -> bool:
     Returns:
         True always (idempotent success)
     """
+    from db.tables import username_index_table
     return username_index_table.delete(username, user_id)
 
 
@@ -95,6 +96,7 @@ def create_username_hold(
     Returns:
         True if created successfully, False if username already has a hold
     """
+    from db.tables import username_hold_table
     return username_hold_table.create(username, user_id, hold_expire_time)
 
 
@@ -108,6 +110,7 @@ def delete_username_hold(
     Returns:
         True if deleted or if no matching entry existed
     """
+    from db.tables import username_hold_table
     return username_hold_table.delete(username, user_id, hold_expire_time)
 
 
@@ -119,6 +122,7 @@ def update_user_username(user_id: int, new_username: str) -> bool:
     Returns:
         True if updated, False if user not found
     """
+    from db.tables import user_blob_table
     return user_blob_table.update_username(user_id, new_username)
 
 
@@ -171,6 +175,7 @@ def get_hold_time_seconds() -> int:
 
 def init_premade_users():
     """Create the three premade users: Bob (1), Alice (2), Tom (3)."""
+    from db.tables import username_index_table, username_hold_table, user_blob_table
     user_blob_table.create(1, "Bob", "bob@example.com")
     user_blob_table.create(2, "Alice", "alice@example.com")
     user_blob_table.create(3, "Tom", "tom@example.com")

@@ -73,6 +73,33 @@ def test_service_uses_only_allowed_apis():
                 f"Allowed modules: {allowed_modules}. "
                 f"The service can ONLY use the defined APIs in db.db_api, not direct table access."
             )
+            # If importing from db.db_api, check that only public API functions are imported,
+            # not the raw table objects (username_index_table, etc.) which would give direct access.
+            if module == "db.db_api":
+                allowed_names = {
+                    "read_user_by_id",
+                    "read_username_index",
+                    "read_username_hold",
+                    "create_username_index",
+                    "delete_username_index",
+                    "create_username_hold",
+                    "delete_username_hold",
+                    "update_user_username",
+                    "atomic_changeset",
+                    "get_cache_update_interval",
+                    "get_dangling_pointer_lockout",
+                    "get_hold_time_seconds",
+                    "init_premade_users",
+                    "tick_clock",
+                }
+                for alias in node.names:
+                    name = alias.name
+                    assert name in allowed_names, (
+                        f"Service imports disallowed name '{name}' from db.db_api. "
+                        f"Allowed names: {allowed_names}. "
+                        f"The service can ONLY use the public API functions, not the raw table objects "
+                        f"(username_index_table, username_hold_table, user_blob_table) which would give direct table access."
+                    )
         elif isinstance(node, ast.Call):
             # Check for importlib.import_module() or __import__() calls
             if isinstance(node.func, ast.Attribute):
