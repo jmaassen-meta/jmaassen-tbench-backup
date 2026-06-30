@@ -1,9 +1,5 @@
 """
 Test helper functions for simulating race conditions.
-
-These functions are hidden from the agent (in the protected db package).
-They set up specific race scenarios by manually controlling cache state
-and DB state, then verify the final state for violations.
 """
 
 import time
@@ -82,26 +78,18 @@ def run_concurrent_1(change_username_fn: Callable) -> List[Tuple[str, bool]]:
 
 def run_concurrent_2(change_username_fn: Callable) -> Tuple[bool, Dict[str, Any]]:
     """
-    Simulate the hold visibility race:
-    - Bob changes Bob->Robert, creating hold on Bob and deleting Bob index
-    - Alice's cache sees the Bob index deleted (available) but NOT the Bob hold (stale)
-    - Alice tries to take Bob. Buggy version sees no index and no hold, proceeds and
-      succeeds, violating the hold (Bob has a hold on Bob but Alice now owns Bob).
-    - Fixed version creates a target hold on Bob as part of the atomic changeset,
-      which fails because the Bob hold already exists in the global table.
-    
-    Returns:
-        (violation_occurred, state) - violation_occurred is True if Alice succeeded
-        in taking Bob even though Bob has a hold (buggy version), False if Alice was
-        blocked (fixed version).
+    Simulate the hold visibility race.
+    Returns (violation_occurred, state).
     """
     from db.read_cache import _thread_local
     
-    # Manually set up global state as if Bob changed Bob->Robert:
-    # - Hold on Bob exists in global table (not expired, user_id=1)
-    # - Bob index does NOT exist in global table (deleted)
-    # - Robert index exists, pointing to Bob (user_id=1)
-    # - Bob's user.blob username = "Robert"
+    # Ensure caches exist before manual setup
+    get_client_cache("username_index", 0.5)
+    get_client_cache("username_hold", 0.5)
+    get_client_cache("user_blob", 0.5)
+    force_cache_update()
+    
+    # Manually set up global state as if Bob changed Bob->Robert
     now = time.time()
     username_hold_table._data["Bob"] = UsernameHoldEntry(
         user_id=1, time_created=now, time_expired=now + 3.0
@@ -114,17 +102,27 @@ def run_concurrent_2(change_username_fn: Callable) -> Tuple[bool, Dict[str, Any]
     
     disable_auto_cache()
     
-    # Alice's cache is stale. Manually set it up to see:
-    # - No Bob index (Bob available) - index cache does NOT have Bob key
-    # - No Bob hold (stale) - hold cache does NOT have Bob key
+    # Alice's cache is stale. Explicitly remove Bob from the index and hold caches,
+    # and set the last_update time to now, so the cache will NOT update even if
+    # the time since last update is checked. This ensures Alice's cache does not
+    # see the Bob hold or the Bob index deletion.
     if hasattr(_thread_local, 'caches'):
         for key, cache in list(_thread_local.caches.items()):
             if "username_index" in key:
                 if "Bob" in cache._cache:
                     del cache._cache["Bob"]
+                # Set last_update to now to prevent auto update based on time
+                cache._last_update = time.time()
             if "username_hold" in key:
                 if "Bob" in cache._cache:
                     del cache._cache["Bob"]
+                cache._last_update = time.time()
+            if "user_blob" in key:
+                # Do not update user.blob cache - keep Bob's username as "Bob" (stale)
+                # Actually, for the hold visibility race, we want the index to be clear
+                # but the hold not visible. The user.blob can be stale or not, doesn't matter.
+                # Let's keep it stale as well.
+                cache._last_update = time.time()
     
     # Alice tries to take Bob. Her cache sees no Bob index (available) and no hold.
     success, msg = change_username_fn(2, "Bob")
@@ -132,7 +130,6 @@ def run_concurrent_2(change_username_fn: Callable) -> Tuple[bool, Dict[str, Any]
     enable_auto_cache()
     force_cache_update()
     
-    # Check if a violation occurred
     violation = False
     state = {}
     
@@ -147,7 +144,6 @@ def run_concurrent_2(change_username_fn: Callable) -> Tuple[bool, Dict[str, Any]
     state["bob_hold_user"] = bob_hold.user_id if bob_hold else None
     state["alice_success"] = success
     
-    # Violation: Alice succeeded in taking Bob even though Bob has a hold on Bob
     if success and bob_hold is not None and bob_hold.user_id == 1:
         violation = True
         state["violation_reason"] = "Alice took Bob even though Bob has a hold"
