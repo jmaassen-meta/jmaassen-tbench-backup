@@ -1,5 +1,10 @@
 """
 Test helper functions for simulating race conditions.
+
+These functions are hidden from the agent (in the protected db package).
+They set up specific race scenarios by calling the agent's code to set up the
+global state, then manually controlling the cache to simulate stale caches.
+The tests call these helpers without revealing the implementation.
 """
 
 import time
@@ -78,58 +83,68 @@ def run_concurrent_1(change_username_fn: Callable) -> List[Tuple[str, bool]]:
 
 def run_concurrent_2(change_username_fn: Callable) -> Tuple[bool, Dict[str, Any]]:
     """
-    Simulate the hold visibility race.
-    Returns (violation_occurred, state).
+    Simulate the hold visibility race:
+    - Bob changes Bob->Robert, creating hold on Bob and deleting Bob index
+    - Alice's cache sees the Bob index deleted (available) but NOT the Bob hold (stale)
+    - Alice tries to take Bob. Buggy version sees no index and no hold, proceeds and
+      succeeds, violating the hold (Bob has a hold on Bob but Alice now owns Bob).
+    - Fixed version creates a target hold on Bob as part of the atomic changeset,
+      which fails because the Bob hold already exists in the global table.
+    
+    Uses the agent's code to set up the global state (Bob's change), then manually
+    controls the cache to ensure Alice's cache is stale. This proves the buggy
+    version can produce the state that leads to the race.
     """
     from db.read_cache import _thread_local
+    results = []
     
-    # Ensure caches exist before manual setup
+    # Ensure caches exist before Bob's change, so they are populated with the
+    # initial state (no holds). After Bob's change, the caches will be stale
+    # because auto updates are disabled.
     get_client_cache("username_index", 0.5)
     get_client_cache("username_hold", 0.5)
     get_client_cache("user_blob", 0.5)
     force_cache_update()
     
-    # Manually set up global state as if Bob changed Bob->Robert
-    now = time.time()
-    username_hold_table._data["Bob"] = UsernameHoldEntry(
-        user_id=1, time_created=now, time_expired=now + 3.0
-    )
-    if "Bob" in username_index_table._data:
-        del username_index_table._data["Bob"]
-    username_index_table._data["Robert"] = UsernameIndexEntry(user_id=1, time_created=now)
-    if 1 in user_blob_table._data:
-        user_blob_table._data[1].username = "Robert"
-    
     disable_auto_cache()
     
-    # Alice's cache is stale. Explicitly remove Bob from the index and hold caches,
-    # and set the last_update time to now, so the cache will NOT update even if
-    # the time since last update is checked. This ensures Alice's cache does not
-    # see the Bob hold or the Bob index deletion.
+    # Bob changes to Robert, creating hold on Bob and deleting Bob index in global table.
+    # The cache is NOT updated (auto updates disabled), so it still has the old state.
+    # This proves the buggy version can produce the state that leads to the race.
+    success, msg = change_username_fn(1, "Robert")
+    results.append(("Bob", success))
+    
+    # Alice's cache is stale (it was populated before Bob's change, with the initial
+    # state where Bob hold does not exist and Bob index exists). Manually set it up
+    # to see:
+    # - No Bob index (Bob available) - index cache does NOT have Bob key. The Bob index
+    #   was deleted from the global table by Bob's change. The index cache still has the
+    #   old Bob index (stale). We manually remove it from the cache to simulate the
+    #   index deletion having propagated, but the hold not yet.
+    # - No Bob hold (stale) - hold cache does NOT have Bob key. The Bob hold was created
+    #   in the global table by Bob's change, but the hold cache was not updated. The hold
+    #   cache does not have the Bob key. We ensure it stays that way.
     if hasattr(_thread_local, 'caches'):
         for key, cache in list(_thread_local.caches.items()):
             if "username_index" in key:
                 if "Bob" in cache._cache:
                     del cache._cache["Bob"]
-                # Set last_update to now to prevent auto update based on time
-                cache._last_update = time.time()
             if "username_hold" in key:
                 if "Bob" in cache._cache:
                     del cache._cache["Bob"]
-                cache._last_update = time.time()
-            if "user_blob" in key:
-                # Do not update user.blob cache - keep Bob's username as "Bob" (stale)
-                # Actually, for the hold visibility race, we want the index to be clear
-                # but the hold not visible. The user.blob can be stale or not, doesn't matter.
-                # Let's keep it stale as well.
-                cache._last_update = time.time()
+            # Set last_update to now to prevent the cache from updating based on time.
+            # Even though auto updates are disabled, setting the last_update ensures
+            # the cache will not be considered stale.
+            cache._last_update = time.time()
     
     # Alice tries to take Bob. Her cache sees no Bob index (available) and no hold.
     success, msg = change_username_fn(2, "Bob")
+    results.append(("Alice", success))
     
     enable_auto_cache()
     force_cache_update()
     
+    # Check if a violation occurred
     violation = False
     state = {}
     
@@ -144,6 +159,7 @@ def run_concurrent_2(change_username_fn: Callable) -> Tuple[bool, Dict[str, Any]
     state["bob_hold_user"] = bob_hold.user_id if bob_hold else None
     state["alice_success"] = success
     
+    # Violation: Alice succeeded in taking Bob even though Bob has a hold on Bob
     if success and bob_hold is not None and bob_hold.user_id == 1:
         violation = True
         state["violation_reason"] = "Alice took Bob even though Bob has a hold"
@@ -151,7 +167,7 @@ def run_concurrent_2(change_username_fn: Callable) -> Tuple[bool, Dict[str, Any]
     return violation, state
 
 
-def run_concurrent_3(change_username_fn: Callable) -> bool:
+def run_rapid_change_race(change_username_fn: Callable) -> bool:
     """Simulate the rapid change race and return whether a violation occurred."""
     results = []
     barrier = threading.Barrier(2)
