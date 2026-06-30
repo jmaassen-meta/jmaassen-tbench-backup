@@ -492,6 +492,30 @@ def test_user_can_reclaim_own_username():
     print("✓ test_user_can_reclaim_own_username passed")
 
 
+def test_target_hold_created():
+    """Test that a target hold is created during a successful username change."""
+    reset_db()
+    # Bob changes from Bob to Robert
+    success, _ = change_username(1, "Robert")
+    assert success, "Bob should successfully change to Robert"
+    force_cache_update()
+    # Verify that a target hold on "Robert" was created as part of the change.
+    # The target hold is a temporary lock to prevent the dangling pointer race.
+    # It should exist immediately after the successful change (even though it will
+    # expire naturally, it should be present in the global table).
+    # The buggy version does not create a target hold, so this test will fail
+    # with the buggy version, proving that the target hold fix is necessary.
+    robert_hold = read_username_hold("Robert")
+    assert robert_hold is not None, (
+        "Target hold on 'Robert' should exist after successful change. "
+        "The service should create a hold for the target username to prevent "
+        "the dangling pointer race condition. The buggy version does not create "
+        "this hold, so this test will fail with the buggy version."
+    )
+    assert robert_hold.user_id == 1, f"Target hold should reference user 1, got {robert_hold.user_id}"
+    print("✓ test_target_hold_created passed")
+
+
 def test_concurrent_reclaim():
     """Test that the original owner can reclaim their username even when another user tries concurrently."""
     reset_db()
@@ -554,6 +578,7 @@ if __name__ == "__main__":
     test_concurrent_3()
     test_concurrent_4()
     test_user_can_reclaim_own_username()
+    test_target_hold_created()
     test_concurrent_reclaim()
 
     test_performance()
