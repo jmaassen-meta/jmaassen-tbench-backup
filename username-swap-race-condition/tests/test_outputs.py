@@ -419,6 +419,15 @@ def test_concurrent_4():
             # does not have the Bob hold (stale). The stale Bob index has an old
             # time_created (from initialization), so its age is greater than the lockout.
 
+    # Ensure the Bob index does NOT exist in the global table, so Alice's create
+    # will succeed if she gets that far. The Bob index should have been deleted
+    # by Bob's change, but if not, delete it now. This ensures the test specifically
+    # verifies the target hold fix, not the index already existing.
+    from db.tables import username_index_table
+
+    if "Bob" in username_index_table._data:
+        del username_index_table._data["Bob"]
+
     # At this point, Alice's cache sees:
     # - Bob's user.blob username = "Robert" (updated)
     # - Bob index still points to user 1 (stale, not updated) with age > lockout (old from init)
