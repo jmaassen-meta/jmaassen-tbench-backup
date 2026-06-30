@@ -2,13 +2,13 @@
 Test helper functions for simulating race conditions.
 
 These functions are hidden from the agent (in the protected db package).
-They set up specific race scenarios by manually controlling cache update order
+They set up specific race scenarios by manually controlling cache state
 and DB state. The tests call these helpers without revealing the implementation.
 """
 
 import time
 import threading
-from typing import List, Tuple, Callable
+from typing import List, Tuple, Callable, Dict, Any
 
 from db.db_api import (
     read_user_by_id,
@@ -19,7 +19,7 @@ from db.db_api import (
     get_dangling_pointer_lockout,
 )
 from db.tables import username_index_table, username_hold_table, user_blob_table
-from db.tables import UsernameIndexEntry
+from db.tables import UsernameIndexEntry, UsernameHoldEntry, User
 from db.read_cache import get_client_cache, ReadCache
 
 
@@ -80,23 +80,32 @@ def run_concurrent_1(change_username_fn: Callable) -> List[Tuple[str, bool]]:
     return results
 
 
-def run_concurrent_2(change_username_fn: Callable) -> List[Tuple[str, bool]]:
+def run_concurrent_2(change_username_fn: Callable) -> Tuple[bool, Dict[str, Any]]:
     """
-    Simulate the hold visibility race.
+    Simulate the hold visibility race and return whether a violation occurred.
     
-    Manually sets up the global state as if User1 changed A->B, then sets up
-    User2's cache to see the index clear but not the hold, deterministically
-    triggering the race without relying on the buggy version's User1 change
-    to set up the state correctly.
+    Setup (deterministic, no threads):
+    - Manually set up global state as if Bob changed Bob->Robert:
+      * Hold on Bob exists in global table (not expired)
+      * Bob index does NOT exist in global table (deleted)
+      * Robert index exists, pointing to Bob
+      * Bob's user.blob username = "Robert"
+    - Alice's cache is set up to see:
+      * No Bob index (she sees Bob as available) - index cache does NOT have Bob key
+      * No Bob hold (stale) - hold cache does NOT have Bob key
+    - Alice tries to take Bob. Buggy version sees no index and no hold, proceeds and
+      succeeds, violating the hold (Bob has a hold on Bob but Alice now owns Bob).
+    - Fixed version creates a target hold on Bob as part of the atomic changeset,
+      which fails because the Bob hold already exists in the global table.
+    
+    Returns:
+        (violation_occurred, state) - violation_occurred is True if Alice succeeded
+        in taking Bob even though Bob has a hold (buggy version), False if Alice was
+        blocked (fixed version).
     """
-    results = []
+    from db.read_cache import _thread_local
     
-    # Manually set up the global state as if Bob changed Bob->Robert:
-    # - Hold on Bob exists in global table (not expired)
-    # - Bob index does NOT exist in global table (deleted)
-    # - Robert index exists, pointing to Bob
-    # - Bob's user.blob username = "Robert"
-    from db.tables import UsernameHoldEntry, UsernameIndexEntry
+    # Manually set up global state as if Bob changed Bob->Robert
     now = time.time()
     username_hold_table._data["Bob"] = UsernameHoldEntry(
         user_id=1, time_created=now, time_expired=now + 3.0
@@ -107,14 +116,14 @@ def run_concurrent_2(change_username_fn: Callable) -> List[Tuple[str, bool]]:
     if 1 in user_blob_table._data:
         user_blob_table._data[1].username = "Robert"
     
-    results.append(("Bob", True))
-    
     disable_auto_cache()
     
-    # Alice's cache is stale. Manually set up the exact stale state:
-    # - Bob index does NOT exist in Alice's cache (she sees Bob as available)
-    # - Bob hold does NOT exist in Alice's cache (she does not see the hold)
-    from db.read_cache import _thread_local
+    # Alice's cache is stale. Ensure it does NOT have the Bob index or Bob hold.
+    # The cache was populated at the end of reset_db with the initial state.
+    # After our manual setup, the global state has changed, but the cache is stale.
+    # The Bob index was deleted from the global table, but the cache still has the old
+    # Bob index from initialization. We need to remove it from the cache so Alice
+    # sees Bob as available (no index).
     if hasattr(_thread_local, 'caches'):
         for key, cache in list(_thread_local.caches.items()):
             if "username_index" in key:
@@ -125,19 +134,37 @@ def run_concurrent_2(change_username_fn: Callable) -> List[Tuple[str, bool]]:
                     del cache._cache["Bob"]
     
     # Alice tries to take Bob. Her cache sees no Bob index (available) and no hold.
-    # The buggy version will proceed and successfully take Bob, violating the hold.
-    # The fixed version will create a target hold on Bob, which fails because the
-    # Bob hold already exists in the global table. Alice is blocked.
     success, msg = change_username_fn(2, "Bob")
-    results.append(("Alice", success))
     
     enable_auto_cache()
+    force_cache_update()
     
-    return results
+    # Check if a violation occurred
+    violation = False
+    state = {}
+    
+    bob = read_user_by_id(1)
+    alice = read_user_by_id(2)
+    bob_index = read_username_index("Bob")
+    bob_hold = read_username_hold("Bob")
+    
+    state["bob_username"] = bob.username if bob else None
+    state["alice_username"] = alice.username if alice else None
+    state["bob_index_user"] = bob_index.user_id if bob_index else None
+    state["bob_hold_user"] = bob_hold.user_id if bob_hold else None
+    state["alice_success"] = success
+    
+    # Violation: Alice succeeded in taking Bob even though Bob has a hold on Bob
+    if success and bob_hold is not None and bob_hold.user_id == 1:
+        violation = True
+    
+    return violation, state
 
 
-def run_concurrent_3(change_username_fn: Callable) -> None:
-    """Simulate rapid concurrent username changes for consistency verification."""
+def run_concurrent_3(change_username_fn: Callable) -> bool:
+    """
+    Simulate the rapid change race and return whether a violation occurred.
+    """
     results = []
     barrier = threading.Barrier(2)
     
@@ -160,6 +187,27 @@ def run_concurrent_3(change_username_fn: Callable) -> None:
     t2.start()
     t1.join()
     t2.join()
+    
+    force_cache_update()
+    
+    violation = False
+    bob = read_user_by_id(1)
+    alice = read_user_by_id(2)
+    
+    if bob and alice and bob.username == alice.username == "Bob":
+        violation = True
+    
+    for uid in [1, 2, 3]:
+        user = read_user_by_id(uid)
+        if user:
+            index = read_username_index(user.username)
+            if index:
+                if index.user_id != uid:
+                    violation = True
+            else:
+                violation = True
+    
+    return violation
 
 
 def run_concurrent_reclaim_race(change_username_fn: Callable) -> List[Tuple[str, bool]]:

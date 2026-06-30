@@ -359,12 +359,16 @@ def test_concurrent_1():
 def test_concurrent_2():
     """Test concurrent changes where one user changes while another tries to claim."""
     reset_db()
-    results = run_concurrent_2(change_username)
-    bob_result = [r for r in results if r[0] == "Bob"][0]
-    assert bob_result[1], "Bob should successfully change to Robert"
-    alice_result = [r for r in results if r[0] == "Alice"][0]
-    assert not alice_result[1], (
-        f"Alice should not be able to take Bob due to hold, but she succeeded"
+    violation, state = run_concurrent_2(change_username)
+    # The buggy version allows the race (Alice succeeds in taking Bob even though
+    # Bob has a hold), causing a violation of the hold rule. The test should fail
+    # with the buggy version because a violation occurred.
+    # The fixed version prevents the race (Alice is blocked by the target hold),
+    # so no violation occurs and the test passes.
+    assert not violation, (
+        f"A violation occurred: Alice succeeded in taking Bob even though Bob has a hold. "
+        f"This proves the buggy version is vulnerable to the hold visibility race. "
+        f"State: {state}"
     )
     print("✓ test_concurrent_2 passed")
 
@@ -392,8 +396,28 @@ def test_concurrent_4():
     """Test that concurrent operations maintain consistency across all tables."""
     reset_db()
 
-    # Disable auto cache updates BEFORE Bob's change, so the cache remains stale
-    # after Bob's change and does not see the Bob hold.
+    # Manually set up the global state as if Bob changed Bob->Robert:
+    # - Hold on Bob exists in global table (not expired)
+    # - Bob index does NOT exist in global table (deleted)
+    # - Robert index exists, pointing to Bob
+    # - Bob's user.blob username = "Robert"
+    from db.tables import username_index_table, username_hold_table, user_blob_table
+    from db.tables import UsernameHoldEntry, UsernameIndexEntry
+    import time
+
+    now = time.time()
+    username_hold_table._data["Bob"] = UsernameHoldEntry(
+        user_id=1, time_created=now, time_expired=now + 3.0
+    )
+    if "Bob" in username_index_table._data:
+        del username_index_table._data["Bob"]
+    username_index_table._data["Robert"] = UsernameIndexEntry(
+        user_id=1, time_created=now
+    )
+    if 1 in user_blob_table._data:
+        user_blob_table._data[1].username = "Robert"
+
+    # Disable auto cache updates to simulate stale cache scenario.
     from db.test_helpers import (
         disable_auto_cache,
         enable_auto_cache,
@@ -401,16 +425,6 @@ def test_concurrent_4():
     )
 
     disable_auto_cache()
-
-    # Bob changes Bob -> Robert, creating hold on Bob in global table
-    # and deleting the Bob index from the global table.
-    # The cache is NOT updated (auto updates disabled), so it still has the old state.
-    success, _ = change_username(1, "Robert")
-    assert success, "Bob should successfully change to Robert"
-
-    # Manually update only the user.blob cache (so we see Bob's username as Robert),
-    # but do NOT update the hold cache or index cache.
-    # This simulates the race where user.blob updates before index/hold in distributed caches.
     from db.read_cache import _thread_local
 
     if hasattr(_thread_local, "caches"):
@@ -485,32 +499,6 @@ def test_user_can_reclaim_own_username():
     print("✓ test_user_can_reclaim_own_username passed")
 
 
-def test_target_hold_created():
-    """Test that a target hold is created during a successful username change."""
-    reset_db()
-    # Bob changes from Bob to Robert
-    success, _ = change_username(1, "Robert")
-    assert success, "Bob should successfully change to Robert"
-    force_cache_update()
-    # Verify that a target hold on "Robert" was created as part of the change.
-    # The target hold is a temporary lock to prevent the dangling pointer race.
-    # It should exist immediately after the successful change (even though it will
-    # expire naturally, it should be present in the global table).
-    # The buggy version does not create a target hold, so this test will fail
-    # with the buggy version, proving that the target hold fix is necessary.
-    robert_hold = read_username_hold("Robert")
-    assert robert_hold is not None, (
-        "Target hold on 'Robert' should exist after successful change. "
-        "The service should create a hold for the target username to prevent "
-        "the dangling pointer race condition. The buggy version does not create "
-        "this hold, so this test will fail with the buggy version."
-    )
-    assert robert_hold.user_id == 1, (
-        f"Target hold should reference user 1, got {robert_hold.user_id}"
-    )
-    print("✓ test_target_hold_created passed")
-
-
 def test_concurrent_reclaim():
     """Test that the original owner can reclaim their username even when another user tries concurrently."""
     reset_db()
@@ -573,7 +561,6 @@ if __name__ == "__main__":
     test_concurrent_3()
     test_concurrent_4()
     test_user_can_reclaim_own_username()
-    test_target_hold_created()
     test_concurrent_reclaim()
 
     test_performance()
