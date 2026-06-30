@@ -94,6 +94,11 @@ def run_concurrent_2(change_username_fn: Callable) -> Tuple[bool, Dict[str, Any]
     Uses the agent's code to set up the global state (Bob's change), then manually
     controls the cache to ensure Alice's cache is stale. This proves the buggy
     version can produce the state that leads to the race.
+    
+    Returns:
+        (violation_occurred, state) - violation_occurred is True if Alice succeeded
+        in taking Bob even though Bob has a hold (buggy version), False if Alice was
+        blocked (fixed version).
     """
     from db.read_cache import _thread_local
     results = []
@@ -133,8 +138,6 @@ def run_concurrent_2(change_username_fn: Callable) -> Tuple[bool, Dict[str, Any]
                 if "Bob" in cache._cache:
                     del cache._cache["Bob"]
             # Set last_update to now to prevent the cache from updating based on time.
-            # Even though auto updates are disabled, setting the last_update ensures
-            # the cache will not be considered stale.
             cache._last_update = time.time()
     
     # Alice tries to take Bob. Her cache sees no Bob index (available) and no hold.

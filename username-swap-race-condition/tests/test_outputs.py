@@ -403,6 +403,16 @@ def test_concurrent_4():
         enable_auto_cache,
         force_cache_update,
     )
+    from db.read_cache import get_client_cache
+
+    # Ensure caches exist BEFORE Bob's change, so they are populated with the
+    # initial state (no holds). After Bob's change, the caches will be stale
+    # because auto updates are disabled and the hold cache was populated before
+    # the Bob hold was created.
+    get_client_cache("username_index", 0.5)
+    get_client_cache("username_hold", 0.5)
+    get_client_cache("user_blob", 0.5)
+    force_cache_update()
 
     disable_auto_cache()
 
@@ -490,8 +500,6 @@ def test_user_can_reclaim_own_username():
     user = read_user_by_id(1)
     assert user.username == "Bob", f"Bob should have username Bob, got {user.username}"
     print("✓ test_user_can_reclaim_own_username passed")
-
-
 
 
 def test_concurrent_reclaim():
