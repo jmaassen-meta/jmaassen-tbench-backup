@@ -44,7 +44,6 @@ from db.test_helpers import (
     cleanup_test_holds,
     setup_expired_hold,
     run_concurrent_reclaim_race,
-
 )
 from username_service import change_username
 
@@ -335,31 +334,42 @@ def test_concurrent_4():
     """Test that concurrent operations maintain consistency across all tables."""
     reset_db()
 
-    # Bob changes Bob -> Robert, creating hold on Bob
+    # Bob changes Bob -> Robert, creating hold on Bob in global table
     success, _ = change_username(1, "Robert")
     assert success, "Bob should successfully change to Robert"
 
-    # Wait for Bob's user.blob to update in cache, but not the index or hold
-    # (simulates the race condition where user.blob updates before index/hold)
-    force_cache_update()
+    # Disable auto cache updates to simulate stale cache scenario.
+    # Manually update only the user.blob cache (so we see Bob's username as Robert),
+    # but do NOT update the hold cache or index cache.
+    # This simulates the race where user.blob updates before index/hold in distributed caches.
+    from db.test_helpers import (
+        disable_auto_cache,
+        enable_auto_cache,
+        force_cache_update,
+    )
+
+    disable_auto_cache()
+    from db.read_cache import _thread_local
+
+    if hasattr(_thread_local, "caches"):
+        for key, cache in list(_thread_local.caches.items()):
+            if "user_blob" in key:
+                cache._update_from_global()
+            # Do not update username_index or username_hold caches - keep them stale
 
     # At this point, a buggy client might see:
     # - Bob's user.blob username = "Robert" (updated)
-    # - Bob index still points to user 1 (not yet updated in cache)
-    # - No hold on Bob yet (not yet visible in cache)
+    # - Bob index still points to user 1 (stale, not updated)
+    # - No hold on Bob (stale, not updated)
     # So the client thinks Bob is a dangling pointer and tries to claim it.
 
-    # Alice tries to take "Bob". With the fix, she should:
-    # 1. Try to create a hold on "Bob" - this will fail because Bob's hold already
-    #    exists (even though Alice couldn't see it in her stale cache).
-    # 2. Abort the operation.
-    # Without the fix, Alice would see no hold, see the dangling pointer, and take Bob,
-    # leading to both Bob and Alice having username "Bob".
-
+    # Alice tries to take "Bob".
     success, msg = change_username(2, "Bob")
-    # Should fail because Bob has a hold (even if Alice couldn't see it, the create will fail)
+    # Should fail because Bob has a hold (even if Alice couldn't see it in her stale cache,
+    # the service should prevent her from taking Bob)
     assert not success, f"Alice should not be able to take Bob due to hold: {msg}"
 
+    enable_auto_cache()
     # Verify only Bob (user 1) has the hold on "Bob", not Alice
     force_cache_update()
     bob_hold = read_username_hold("Bob")
@@ -425,8 +435,6 @@ def test_concurrent_reclaim():
     print("✓ test_concurrent_reclaim passed")
 
 
-
-
 def test_performance():
     """Test that the service handles many concurrent username changes quickly without waiting for caches.
 
@@ -471,6 +479,6 @@ if __name__ == "__main__":
     test_concurrent_4()
     test_user_can_reclaim_own_username()
     test_concurrent_reclaim()
-    
+
     test_performance()
     print("\n✅ All tests passed!")

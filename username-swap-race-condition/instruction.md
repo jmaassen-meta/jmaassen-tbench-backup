@@ -69,7 +69,7 @@ Modify `/app/username_service.py` to fix the race conditions.
 **Constraints:**
 - DB implementation in `/db` is hidden and cannot be modified.
 - Only modify files in `/app` (the service layer).
-- The username service can ONLY access the DB via the defined APIs in `db.db_api` (read_user_by_id, read_username_index, read_username_hold, create_username_index, delete_username_index, create_username_hold, delete_username_hold, update_user_username, atomic_changeset, and the utility functions). Direct access to the database tables (db.tables), lock manager (db.lock_manager), or other internal DB modules is NOT allowed. The service must use only the public API.
+- The username service can ONLY access the DB via the defined APIs in `db.db_api`. Allowed imports in `username_service.py`: `time`, `typing`, `db.db_api`, `config`. No new imports are allowed beyond what is already imported in the buggy version. Direct access to the database tables (db.tables), lock manager (db.lock_manager), or other internal DB modules is not allowed.
 - The solution must handle concurrent username changes correctly.
 - The solution must be performant: A solution that simply waits out the cache timings will not be accepted.
 
