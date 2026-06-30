@@ -1,13 +1,4 @@
-"""
-Username service with change_username function.
-
-This implementation is buggy and has race conditions that can lead to
-violations of the username ownership rules when multiple users change
-usernames concurrently.
-
-The agent must fix the race conditions to ensure correct behavior
-under concurrent access.
-"""
+"""Username service with change_username function."""
 
 import time
 from typing import Tuple
@@ -29,8 +20,19 @@ from db.db_api import (
 from config import HOLD_TIME_SECONDS, DANGLING_POINTER_LOCKOUT
 
 
-def change_username_buggy(user_id: int, target_username: str) -> Tuple[bool, str]:
-    """Change a user's username to the target username."""
+def change_username(user_id: int, target_username: str) -> Tuple[bool, str]:
+    """
+    Change a user's username to the target username.
+
+    Args:
+        user_id: The ID of the user changing their username
+        target_username: The desired new username
+
+    Returns:
+        (success, message) tuple. Success means the user now has the target
+        username or already had it. Failure means the username could not be
+        claimed (hold active, already taken, etc.) and the user remains unchanged.
+    """
     user = read_user_by_id(user_id)
     if not user:
         return False, "User not found"
@@ -49,8 +51,6 @@ def change_username_buggy(user_id: int, target_username: str) -> Tuple[bool, str
         current_username, user_id, time.time() + HOLD_TIME_SECONDS
     )
     if not hold_created:
-        # Hold already exists. Delete the existing hold first, then create a new one.
-        # Do not use atomic changeset with delete+create on the same data.
         existing_hold = read_username_hold(current_username)
         if existing_hold:
             ops = [
@@ -118,24 +118,3 @@ def change_username_buggy(user_id: int, target_username: str) -> Tuple[bool, str
         True,
         f"Successfully changed username from {current_username} to {target_username}",
     )
-
-
-def change_username(user_id: int, target_username: str) -> Tuple[bool, str]:
-    """
-    Change a user's username to the target username.
-
-    This is the function the agent needs to fix. The current implementation is subject to race conditions.
-
-    The agent should modify this function to properly handle concurrent
-    username changes without violation of the username change constraints.
-
-    Args:
-        user_id: The ID of the user changing their username
-        target_username: The desired new username
-
-    Returns:
-        (success, message) tuple. Success means the user now has the target
-        username or already had it. Failure means the username could not be
-        claimed (hold active, already taken, etc.) and the user remains unchanged.
-    """
-    return change_username_buggy(user_id, target_username)

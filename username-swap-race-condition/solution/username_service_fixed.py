@@ -1,6 +1,4 @@
-"""
-Username service with fixed change_username function.
-"""
+"""Username service with change_username function."""
 
 import time
 from typing import Tuple
@@ -23,7 +21,18 @@ from config import HOLD_TIME_SECONDS, DANGLING_POINTER_LOCKOUT
 
 
 def change_username(user_id: int, target_username: str) -> Tuple[bool, str]:
-    """Change a user's username to the target username."""
+    """
+    Change a user's username to the target username.
+
+    Args:
+        user_id: The ID of the user changing their username
+        target_username: The desired new username
+
+    Returns:
+        (success, message) tuple. Success means the user now has the target
+        username or already had it. Failure means the username could not be
+        claimed (hold active, already taken, etc.) and the user remains unchanged.
+    """
     user = read_user_by_id(user_id)
     if not user:
         return False, "User not found"
@@ -37,8 +46,6 @@ def change_username(user_id: int, target_username: str) -> Tuple[bool, str]:
     old_hold_expire = time.time() + HOLD_TIME_SECONDS
     hold_created = create_username_hold(current_username, user_id, old_hold_expire)
     if not hold_created:
-        # Hold already exists. Delete the existing hold first, then create a new one.
-        # Do not use atomic changeset with delete+create on the same data, as it's not allowed.
         existing_hold = read_username_hold(current_username)
         if existing_hold:
             delete_username_hold(current_username, existing_hold.user_id, existing_hold.time_expired)
@@ -67,15 +74,12 @@ def change_username(user_id: int, target_username: str) -> Tuple[bool, str]:
             delete_username_hold(current_username, user_id, old_hold_expire)
             return False, f"Target username already taken by user {target_index.user_id}"
     
-    ops = []
-    
     if target_hold:
-        ops.append({
-            'op': 'delete_username_hold',
-            'username': target_username,
-            'user_id': target_hold.user_id,
-            'hold_expire_time': target_hold.time_expired,
-        })
+        now = time.time()
+        if target_hold.time_expired <= now or target_hold.user_id == user_id:
+            delete_username_hold(target_username, target_hold.user_id, target_hold.time_expired)
+    
+    ops = []
     
     target_hold_expire = time.time() + HOLD_TIME_SECONDS
     ops.append({
