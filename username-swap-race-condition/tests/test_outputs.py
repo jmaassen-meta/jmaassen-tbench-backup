@@ -55,7 +55,7 @@ def test_service_uses_only_allowed_apis():
 
     tree = ast.parse(source)
 
-    allowed_modules = {"time", "typing", "db.db_api", "config", "db.clock"}
+    allowed_modules = {"time", "typing", "db.db_api", "config"}
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -118,7 +118,7 @@ def test_service_uses_only_allowed_apis():
         if isinstance(value, types.ModuleType):
             module_name = value.__name__
             # Allow the modules that the service is supposed to import
-            if module_name in ("time", "typing", "db.db_api", "config", "db.clock"):
+            if module_name in ("time", "typing", "db.db_api", "config"):
                 continue
             # Allow the db package itself (imported as part of db.db_api)
             if module_name == "db":
