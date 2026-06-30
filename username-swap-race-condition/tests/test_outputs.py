@@ -357,11 +357,28 @@ def test_concurrent_4():
                 cache._update_from_global()
             # Do not update username_index or username_hold caches - keep them stale
 
+    # Manually set the Bob index time_created to be old, so the dangling pointer
+    # age is greater than the lockout period. This ensures the lockout does not
+    # block, and the only thing that should block Alice is the target hold
+    # (or the existing Bob hold, but Alice's cache doesn't see it).
+    from db.tables import username_index_table
+    from db.db_api import get_dangling_pointer_lockout
+
+    if "Bob" in username_index_table._data:
+        # Set the time_created to be old enough that the lockout has passed
+        username_index_table._data["Bob"].time_created = (
+            time.time() - get_dangling_pointer_lockout() - 1.0
+        )
+
     # At this point, a buggy client might see:
     # - Bob's user.blob username = "Robert" (updated)
-    # - Bob index still points to user 1 (stale, not updated)
+    # - Bob index still points to user 1 (stale, not updated) with age > lockout
     # - No hold on Bob (stale, not updated)
-    # So the client thinks Bob is a dangling pointer and tries to claim it.
+    # So the client thinks Bob is a dangling pointer (age > lockout) and tries to claim it.
+    # The buggy version will delete the dangling pointer and take Bob, succeeding.
+    # This is the race condition - the hold on Bob exists but the client couldn't see it.
+    # The fixed version should prevent this by creating a target hold on Bob,
+    # which will fail because the Bob hold already exists in the global table.
 
     # Alice tries to take "Bob".
     success, msg = change_username(2, "Bob")
