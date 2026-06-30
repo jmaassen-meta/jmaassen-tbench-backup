@@ -15,6 +15,7 @@ The service must use the atomic changeset API to make multi-table updates atomic
 - Sonnet 4.6: 4/5 passed (80%)
 - Opus 4.6: 4/5 passed (80%)
 - Avocado: 4/5 passed (80%)
+- GPT-5.5 (Codex): 0/5 passed (0%)
 
 ## Model Analysis
 
@@ -32,6 +33,11 @@ The service must use the atomic changeset API to make multi-table updates atomic
 - 4 trials passed by correctly implementing the target hold fix and using the atomic changeset properly.
 - 1 trial failed because the agent used `time.time() + HOLD_TIME_SECONDS` in the atomic changeset operations for deleting the existing hold, instead of using the actual `time_expired` value from the hold. The delete operation requires the exact expire time to match, and the calculated time did not match the hold's actual expire time, so the delete did not remove the hold. The subsequent create then failed because the hold still existed, causing the changeset to revert.
 - The failure reflects a reasoning gap about the need for precise hold expire time matching when deleting holds, not a task setup issue.
+
+**GPT-5.5 (Codex): 0/5 passed**
+- All 5 trials failed to correctly handle the race conditions.
+- The model did not properly understand the distributed cache consistency model and the need for the target hold fix. The failures were due to not using the atomic changeset correctly or not implementing the target hold to prevent the dangling pointer race.
+- The failures reflect reasoning gaps about distributed systems concurrency, not task setup issues.
 
 **Failure categorization across all models:**
 - **Missing atomic changeset**: 1 failure (Opus) - Agent did not wrap steps 4-7 in an atomic changeset, leaving the multi-table updates vulnerable to interleaving.

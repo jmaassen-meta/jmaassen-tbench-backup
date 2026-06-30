@@ -43,7 +43,7 @@ Import from `db.db_api`:
 **Utility:**
 - `get_cache_update_interval() -> float`
 - `get_dangling_pointer_lockout() -> float` (2x cache interval)
-- `get_hold_expire_time() -> int`
+- `get_hold_time_seconds() -> int`
 
 ## Premade Users
 - Bob (id=1, username="Bob")

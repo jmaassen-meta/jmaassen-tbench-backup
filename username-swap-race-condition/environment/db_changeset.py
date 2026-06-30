@@ -157,7 +157,7 @@ class AtomicChangeset:
                 return False
             now = time.time()
             username_hold_table._data[username] = UsernameHoldEntry(
-                user_id=user_id, time_created=now, time_expired=now + hold_time
+                user_id=user_id, time_created=now, time_expired=hold_time
             )
             return True
         elif op["op"] == "delete_username_hold":
@@ -169,7 +169,7 @@ class AtomicChangeset:
             if username in username_hold_table._data:
                 entry = username_hold_table._data[username]
                 if entry.user_id == user_id:
-                    expected_expired = entry.time_created + hold_time
+                    expected_expired = hold_time
                     if abs(entry.time_expired - expected_expired) < 0.1:
                         del username_hold_table._data[username]
             return True
