@@ -80,14 +80,43 @@ def run_concurrent_1(change_username_fn: Callable) -> List[Tuple[str, bool]]:
 
 
 def run_concurrent_2(change_username_fn: Callable) -> List[Tuple[str, bool]]:
-    """Simulate concurrent changes where one user changes while another tries to claim."""
+    """
+    Simulate concurrent changes where one user changes while another tries
+    to claim the old username. The second user's cache may not see the hold yet.
+    """
     results = []
 
     disable_auto_cache()
 
+    # Bob changes to Robert, creating hold on Bob in global table
+    # and deleting the Bob index from the global table.
     success, msg = change_username_fn(1, "Robert")
     results.append(("Bob", success))
 
+    # Manually update only the user.blob cache (so we see Bob's username as Robert),
+    # but do NOT update the hold cache or index cache.
+    # This simulates the race where user.blob updates before index/hold in distributed caches.
+    from db.read_cache import _thread_local
+
+    if hasattr(_thread_local, "caches"):
+        for key, cache in list(_thread_local.caches.items()):
+            if "user_blob" in key:
+                cache._update_from_global()
+            # Do not update username_index or username_hold caches - keep them stale
+            # The index cache still has the old Bob index (stale), and the hold cache
+            # does not have the Bob hold (stale). The stale Bob index has an old
+            # time_created (from initialization), so its age is greater than the lockout.
+
+    # Alice's cache now sees:
+    # - Bob's user.blob username = "Robert" (updated)
+    # - Bob index still points to user 1 (stale, not updated) with age > lockout
+    # - No hold on Bob (stale, not updated)
+    # So Alice thinks Bob is a dangling pointer (age > lockout) and tries to claim it.
+    # The buggy version will delete the dangling pointer and successfully take Bob.
+    # The fixed version should prevent Alice by creating a target hold on Bob,
+    # which will fail because the Bob hold already exists in the global table.
+
+    # Alice tries to take Bob. Her cache does not see the hold.
     success, msg = change_username_fn(2, "Bob")
     results.append(("Alice", success))
 
