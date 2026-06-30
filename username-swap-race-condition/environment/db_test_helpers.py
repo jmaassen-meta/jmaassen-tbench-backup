@@ -83,7 +83,7 @@ def run_concurrent_1(change_username_fn: Callable) -> List[Tuple[str, bool]]:
     return results
 
 
-def run_hold_visibility_race(change_username_fn: Callable) -> List[Tuple[str, bool]]:
+def run_concurrent_2(change_username_fn: Callable) -> List[Tuple[str, bool]]:
     """
     Simulate the hold visibility race:
     - User1 changes A to B, creating hold on A and deleting index A
@@ -124,7 +124,7 @@ def run_hold_visibility_race(change_username_fn: Callable) -> List[Tuple[str, bo
     return results
 
 
-def run_rapid_change_race(change_username_fn: Callable) -> None:
+def run_concurrent_3(change_username_fn: Callable) -> None:
     """
     Simulate the rapid change race:
     - User1 rapidly changes A->B->A
