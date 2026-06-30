@@ -2,8 +2,8 @@
 Test helper functions for simulating race conditions.
 
 These functions are hidden from the agent (in the protected db package).
-They set up specific race scenarios by manually controlling cache update order
-and DB state. The tests call these helpers without revealing the implementation.
+They set up specific race scenarios by manually controlling cache state.
+The tests call these helpers without revealing the implementation.
 """
 
 import time
@@ -19,12 +19,12 @@ from db.db_api import (
     get_dangling_pointer_lockout,
 )
 from db.tables import username_index_table, username_hold_table, user_blob_table
-from db.tables import UsernameIndexEntry
+from db.tables import UsernameIndexEntry, User
 from db.read_cache import get_client_cache, ReadCache
 
 
 def reset_db_hidden():
-    """Reset DB to initial state. Hidden implementation."""
+    """Reset DB to initial state."""
     username_index_table._data.clear()
     username_hold_table._data.clear()
     user_blob_table._data.clear()
@@ -32,9 +32,7 @@ def reset_db_hidden():
     if hasattr(_thread_local, 'caches'):
         _thread_local.caches.clear()
     init_premade_users()
-    # Set the initial indexes to have old timestamps, so dangling pointers
-    # are old and the lockout does not block. This ensures the race conditions
-    # are reliably triggered.
+    # Set initial indexes to old timestamps so dangling pointers are old
     old_time = time.time() - 10.0
     for username, entry in username_index_table._data.items():
         entry.time_created = old_time
@@ -52,7 +50,7 @@ def force_cache_update():
 
 
 def disable_auto_cache():
-    """Disable automatic cache updates for deterministic testing."""
+    """Disable automatic cache updates."""
     ReadCache.disable_auto_update()
 
 
@@ -87,9 +85,9 @@ def run_concurrent_2(change_username_fn: Callable) -> List[Tuple[str, bool]]:
     """
     Simulate the hold visibility race:
     - User1 changes A to B, creating hold on A and deleting index A
-    - User2's cache sees the index clear (index cache updated) but not the hold yet (hold cache not updated)
-    - User2 tries to claim A, sees index clear and no hold, so it allows the claim (buggy version)
-    - The fixed version should prevent this by creating a target hold on A, which fails because the hold already exists.
+    - User2's cache sees the index clear (Bob available) but not the hold yet
+    - User2 tries to claim A, sees index clear and no hold, proceeds (buggy)
+    - Fixed version creates a target hold on A, which fails because the hold exists.
     """
     results = []
     
@@ -99,23 +97,30 @@ def run_concurrent_2(change_username_fn: Callable) -> List[Tuple[str, bool]]:
     success, msg = change_username_fn(1, "Robert")
     results.append(("Bob", success))
     
-    # Manually control cache updates to simulate the race:
-    # - Update the index cache so Alice sees the Bob index deleted (Bob is available)
-    # - Do NOT update the hold cache, so Alice does not see the hold on Bob yet
-    # - Do NOT update the user.blob cache (not needed for this race)
+    # Alice's cache is stale (auto updates disabled). Manually set up the exact
+    # stale state we want:
+    # - Bob index does NOT exist in Alice's cache (she sees Bob as available)
+    # - Bob hold does NOT exist in Alice's cache (she does not see the hold)
+    # The global table has the Bob hold and no Bob index. Alice's cache should
+    # reflect the stale state before Bob's change.
     from db.read_cache import _thread_local
     if hasattr(_thread_local, 'caches'):
         for key, cache in list(_thread_local.caches.items()):
             if "username_index" in key:
-                cache._update_from_global()
-            # Do not update username_hold or user_blob caches - keep them stale
-            # The hold cache does not have the Bob hold, so Alice does not see it.
-            # The index cache does not have the Bob index (it was deleted), so Alice sees Bob as available.
+                # Remove Bob from the index cache (simulating the index deletion
+                # has propagated, but the hold has not)
+                if "Bob" in cache._cache:
+                    del cache._cache["Bob"]
+            if "username_hold" in key:
+                # Ensure Bob hold is NOT in the hold cache (stale, not updated)
+                if "Bob" in cache._cache:
+                    del cache._cache["Bob"]
+            # Do not update user.blob cache - not needed for this race
     
-    # Alice tries to take Bob. Her cache sees the Bob index deleted (available) and no hold.
-    # The buggy version will allow her to take Bob, even though the hold exists in the global table.
-    # The fixed version should prevent her by creating a target hold on Bob, which will fail
-    # because the Bob hold already exists in the global table.
+    # Alice tries to take Bob. Her cache sees no Bob index (available) and no hold.
+    # The buggy version will proceed and successfully take Bob, violating the hold.
+    # The fixed version will create a target hold on Bob, which fails because the
+    # Bob hold already exists in the global table. Alice is blocked.
     success, msg = change_username_fn(2, "Bob")
     results.append(("Alice", success))
     
@@ -125,51 +130,29 @@ def run_concurrent_2(change_username_fn: Callable) -> List[Tuple[str, bool]]:
 
 
 def run_concurrent_3(change_username_fn: Callable) -> None:
-    """
-    Simulate the rapid change race:
-    - User1 rapidly changes A->B->A
-    - User2's cache sees the old A index (stale), no hold on A (stale), but the updated
-      user.blob with username B (so the A index is a dangling pointer)
-    - User2 thinks A is a dangling pointer (age > lockout) and tries to claim it,
-      deleting the User1->A index even though User1 just changed back to A.
-    - This leads to both users having username A, and the index only pointing to User2.
-    """
+    """Simulate rapid concurrent username changes for consistency verification."""
     results = []
+    barrier = threading.Barrier(2)
     
-    disable_auto_cache()
+    def bob_rapid_changes():
+        success1, _ = change_username_fn(1, "Robert")
+        results.append(("Bob1", success1))
+        if success1:
+            barrier.wait()
+            success2, _ = change_username_fn(1, "Bob")
+            results.append(("Bob2", success2))
     
-    # Bob changes to Robert, creating hold on Bob and deleting Bob index
-    success1, _ = change_username_fn(1, "Robert")
-    results.append(("Bob1", success1))
+    def alice_tries():
+        barrier.wait()
+        success, _ = change_username_fn(2, "Bob")
+        results.append(("Alice", success))
     
-    if success1:
-        # Manually update only the user.blob cache to see Bob's username as Robert,
-        # but do NOT update the index or hold caches.
-        from db.read_cache import _thread_local
-        if hasattr(_thread_local, 'caches'):
-            for key, cache in list(_thread_local.caches.items()):
-                if "user_blob" in key:
-                    cache._update_from_global()
-                # Do not update username_index or username_hold caches
-        
-        # Bob changes back to Bob, creating hold on Robert and recreating Bob index
-        success2, _ = change_username_fn(1, "Bob")
-        results.append(("Bob2", success2))
-        
-        # Do NOT update any caches. Alice's cache still has the stale state:
-        # - user.blob: Bob username = Robert (from manual update after first change)
-        # - index: Bob index still points to user 1 (stale, not updated after Bob's changes)
-        # - hold: No hold on Bob (stale, not updated)
-        # The stale Bob index has an old time_created (from initialization, set to 10s ago),
-        # so its age is greater than the lockout. Alice thinks it's a dangling pointer.
-    
-    # Alice tries to take Bob concurrently.
-    # Her cache sees the dangling pointer (index Bob -> 1, but user 1 username = Robert),
-    # age > lockout, and no hold. She tries to claim Bob.
-    success, _ = change_username_fn(2, "Bob")
-    results.append(("Alice", success))
-    
-    enable_auto_cache()
+    t1 = threading.Thread(target=bob_rapid_changes)
+    t2 = threading.Thread(target=alice_tries)
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
 
 
 def run_concurrent_reclaim_race(change_username_fn: Callable) -> List[Tuple[str, bool]]:

@@ -416,8 +416,22 @@ def test_concurrent_4():
                 cache._update_from_global()
             # Do not update username_index or username_hold caches - keep them stale
             # The index cache still has the old Bob index (stale), and the hold cache
-            # does not have the Bob hold (stale). The stale Bob index has an old
-            # time_created (from initialization), so its age is greater than the lockout.
+            # does not have the Bob hold (stale).
+
+    # Manually set the Bob index time_created in the cache to be old, ensuring
+    # the dangling pointer age is greater than the lockout period. This ensures
+    # the lockout does NOT block Alice, and the only thing that should block her
+    # is the target hold (in the fixed version) or nothing (in the buggy version,
+    # Alice will succeed, causing the test to fail as expected).
+    from db.db_api import get_dangling_pointer_lockout
+
+    if hasattr(_thread_local, "caches"):
+        for key, cache in list(_thread_local.caches.items()):
+            if "username_index" in key:
+                if "Bob" in cache._cache:
+                    cache._cache["Bob"].time_created = (
+                        time.time() - get_dangling_pointer_lockout() - 1.0
+                    )
 
     # Ensure the Bob index does NOT exist in the global table, so Alice's create
     # will succeed if she gets that far. The Bob index should have been deleted
@@ -512,7 +526,9 @@ def test_target_hold_created():
         "the dangling pointer race condition. The buggy version does not create "
         "this hold, so this test will fail with the buggy version."
     )
-    assert robert_hold.user_id == 1, f"Target hold should reference user 1, got {robert_hold.user_id}"
+    assert robert_hold.user_id == 1, (
+        f"Target hold should reference user 1, got {robert_hold.user_id}"
+    )
     print("✓ test_target_hold_created passed")
 
 
