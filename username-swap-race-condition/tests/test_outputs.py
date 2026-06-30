@@ -392,34 +392,8 @@ def test_concurrent_4():
     """Test that concurrent operations maintain consistency across all tables."""
     reset_db()
 
-    # Manually set up the global state as if Bob changed Bob -> Robert:
-    # - Hold on Bob exists in global table (created by Bob, not expired)
-    # - Bob index does NOT exist in global table (deleted by Bob's change)
-    # - Robert index exists in global table, pointing to Bob
-    # - Bob's user.blob username = "Robert" in global table
-    from db.tables import username_index_table, username_hold_table, user_blob_table
-    from db.tables import UsernameHoldEntry, UsernameIndexEntry
-    import time
-
-    # Create hold on Bob
-    now = time.time()
-    username_hold_table._data["Bob"] = UsernameHoldEntry(
-        user_id=1, time_created=now, time_expired=now + 3.0
-    )
-    # Delete Bob index, create Robert index
-    if "Bob" in username_index_table._data:
-        del username_index_table._data["Bob"]
-    username_index_table._data["Robert"] = UsernameIndexEntry(
-        user_id=1, time_created=now
-    )
-    # Update Bob's username to Robert
-    if 1 in user_blob_table._data:
-        user_blob_table._data[1].username = "Robert"
-
-    # Disable auto cache updates to simulate stale cache scenario.
-    # Manually update only the user.blob cache (so we see Bob's username as Robert),
-    # but do NOT update the hold cache or index cache.
-    # This simulates the race where user.blob updates before index/hold in distributed caches.
+    # Disable auto cache updates BEFORE Bob's change, so the cache remains stale
+    # after Bob's change and does not see the Bob hold.
     from db.test_helpers import (
         disable_auto_cache,
         enable_auto_cache,
@@ -427,6 +401,16 @@ def test_concurrent_4():
     )
 
     disable_auto_cache()
+
+    # Bob changes Bob -> Robert, creating hold on Bob in global table
+    # and deleting the Bob index from the global table.
+    # The cache is NOT updated (auto updates disabled), so it still has the old state.
+    success, _ = change_username(1, "Robert")
+    assert success, "Bob should successfully change to Robert"
+
+    # Manually update only the user.blob cache (so we see Bob's username as Robert),
+    # but do NOT update the hold cache or index cache.
+    # This simulates the race where user.blob updates before index/hold in distributed caches.
     from db.read_cache import _thread_local
 
     if hasattr(_thread_local, "caches"):
