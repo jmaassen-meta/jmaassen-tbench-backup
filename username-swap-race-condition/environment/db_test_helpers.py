@@ -167,7 +167,7 @@ def run_concurrent_2(change_username_fn: Callable) -> Tuple[bool, Dict[str, Any]
     return violation, state
 
 
-def run_rapid_change_race(change_username_fn: Callable) -> bool:
+def run_concurrent_3(change_username_fn: Callable) -> bool:
     """Simulate the rapid change race and return whether a violation occurred."""
     results = []
     barrier = threading.Barrier(2)
