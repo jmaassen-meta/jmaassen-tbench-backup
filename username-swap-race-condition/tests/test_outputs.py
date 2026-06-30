@@ -335,6 +335,7 @@ def test_concurrent_4():
     reset_db()
 
     # Bob changes Bob -> Robert, creating hold on Bob in global table
+    # and deleting the Bob index from the global table.
     success, _ = change_username(1, "Robert")
     assert success, "Bob should successfully change to Robert"
 
@@ -356,29 +357,20 @@ def test_concurrent_4():
             if "user_blob" in key:
                 cache._update_from_global()
             # Do not update username_index or username_hold caches - keep them stale
+            # The index cache still has the old Bob index (stale), and the hold cache
+            # does not have the Bob hold (stale). The stale Bob index has an old
+            # time_created (from initialization), so its age is greater than the lockout.
 
-    # Manually set the Bob index time_created to be old, so the dangling pointer
-    # age is greater than the lockout period. This ensures the lockout does not
-    # block, and the only thing that should block Alice is the target hold
-    # (or the existing Bob hold, but Alice's cache doesn't see it).
-    from db.tables import username_index_table
-    from db.db_api import get_dangling_pointer_lockout
-
-    if "Bob" in username_index_table._data:
-        # Set the time_created to be old enough that the lockout has passed
-        username_index_table._data["Bob"].time_created = (
-            time.time() - get_dangling_pointer_lockout() - 1.0
-        )
-
-    # At this point, a buggy client might see:
+    # At this point, Alice's cache sees:
     # - Bob's user.blob username = "Robert" (updated)
-    # - Bob index still points to user 1 (stale, not updated) with age > lockout
+    # - Bob index still points to user 1 (stale, not updated) with age > lockout (old from init)
     # - No hold on Bob (stale, not updated)
-    # So the client thinks Bob is a dangling pointer (age > lockout) and tries to claim it.
+    # So Alice thinks Bob is a dangling pointer (age > lockout) and tries to claim it.
     # The buggy version will delete the dangling pointer and take Bob, succeeding.
-    # This is the race condition - the hold on Bob exists but the client couldn't see it.
+    # This is the race condition - the hold on Bob exists but Alice couldn't see it.
     # The fixed version should prevent this by creating a target hold on Bob,
-    # which will fail because the Bob hold already exists in the global table.
+    # which will fail because the Bob hold already exists in the global table,
+    # even though Alice couldn't see it in her stale cache.
 
     # Alice tries to take "Bob".
     success, msg = change_username(2, "Bob")
