@@ -392,10 +392,29 @@ def test_concurrent_4():
     """Test that concurrent operations maintain consistency across all tables."""
     reset_db()
 
-    # Bob changes Bob -> Robert, creating hold on Bob in global table
-    # and deleting the Bob index from the global table.
-    success, _ = change_username(1, "Robert")
-    assert success, "Bob should successfully change to Robert"
+    # Manually set up the global state as if Bob changed Bob -> Robert:
+    # - Hold on Bob exists in global table (created by Bob, not expired)
+    # - Bob index does NOT exist in global table (deleted by Bob's change)
+    # - Robert index exists in global table, pointing to Bob
+    # - Bob's user.blob username = "Robert" in global table
+    from db.tables import username_index_table, username_hold_table, user_blob_table
+    from db.tables import UsernameHoldEntry, UsernameIndexEntry
+    import time
+
+    # Create hold on Bob
+    now = time.time()
+    username_hold_table._data["Bob"] = UsernameHoldEntry(
+        user_id=1, time_created=now, time_expired=now + 3.0
+    )
+    # Delete Bob index, create Robert index
+    if "Bob" in username_index_table._data:
+        del username_index_table._data["Bob"]
+    username_index_table._data["Robert"] = UsernameIndexEntry(
+        user_id=1, time_created=now
+    )
+    # Update Bob's username to Robert
+    if 1 in user_blob_table._data:
+        user_blob_table._data[1].username = "Robert"
 
     # Disable auto cache updates to simulate stale cache scenario.
     # Manually update only the user.blob cache (so we see Bob's username as Robert),
@@ -415,36 +434,12 @@ def test_concurrent_4():
             if "user_blob" in key:
                 cache._update_from_global()
             # Do not update username_index or username_hold caches - keep them stale
-            # The index cache still has the old Bob index (stale), and the hold cache
-            # does not have the Bob hold (stale).
-
-    # Manually set the Bob index time_created in the cache to be old, ensuring
-    # the dangling pointer age is greater than the lockout period. This ensures
-    # the lockout does NOT block Alice, and the only thing that should block her
-    # is the target hold (in the fixed version) or nothing (in the buggy version,
-    # Alice will succeed, causing the test to fail as expected).
-    from db.db_api import get_dangling_pointer_lockout
-
-    if hasattr(_thread_local, "caches"):
-        for key, cache in list(_thread_local.caches.items()):
-            if "username_index" in key:
-                if "Bob" in cache._cache:
-                    cache._cache["Bob"].time_created = (
-                        time.time() - get_dangling_pointer_lockout() - 1.0
-                    )
-
-    # Ensure the Bob index does NOT exist in the global table, so Alice's create
-    # will succeed if she gets that far. The Bob index should have been deleted
-    # by Bob's change, but if not, delete it now. This ensures the test specifically
-    # verifies the target hold fix, not the index already existing.
-    from db.tables import username_index_table
-
-    if "Bob" in username_index_table._data:
-        del username_index_table._data["Bob"]
+            # The index cache still has the old Bob index (stale, from initialization, age > lockout),
+            # and the hold cache does not have the Bob hold (stale).
 
     # At this point, Alice's cache sees:
-    # - Bob's user.blob username = "Robert" (updated)
-    # - Bob index still points to user 1 (stale, not updated) with age > lockout (old from init)
+    # - Bob's user.blob username = "Robert" (updated, manual cache update)
+    # - Bob index still points to user 1 (stale, not updated) with age > lockout (old from init, 10s ago)
     # - No hold on Bob (stale, not updated)
     # So Alice thinks Bob is a dangling pointer (age > lockout) and tries to claim it.
     # The buggy version will delete the dangling pointer and take Bob, succeeding.

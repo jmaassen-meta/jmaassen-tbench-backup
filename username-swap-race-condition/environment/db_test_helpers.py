@@ -2,8 +2,8 @@
 Test helper functions for simulating race conditions.
 
 These functions are hidden from the agent (in the protected db package).
-They set up specific race scenarios by manually controlling cache state.
-The tests call these helpers without revealing the implementation.
+They set up specific race scenarios by manually controlling cache update order
+and DB state. The tests call these helpers without revealing the implementation.
 """
 
 import time
@@ -19,7 +19,7 @@ from db.db_api import (
     get_dangling_pointer_lockout,
 )
 from db.tables import username_index_table, username_hold_table, user_blob_table
-from db.tables import UsernameIndexEntry, User
+from db.tables import UsernameIndexEntry
 from db.read_cache import get_client_cache, ReadCache
 
 
@@ -32,7 +32,6 @@ def reset_db_hidden():
     if hasattr(_thread_local, 'caches'):
         _thread_local.caches.clear()
     init_premade_users()
-    # Set initial indexes to old timestamps so dangling pointers are old
     old_time = time.time() - 10.0
     for username, entry in username_index_table._data.items():
         entry.time_created = old_time
@@ -83,39 +82,47 @@ def run_concurrent_1(change_username_fn: Callable) -> List[Tuple[str, bool]]:
 
 def run_concurrent_2(change_username_fn: Callable) -> List[Tuple[str, bool]]:
     """
-    Simulate the hold visibility race:
-    - User1 changes A to B, creating hold on A and deleting index A
-    - User2's cache sees the index clear (Bob available) but not the hold yet
-    - User2 tries to claim A, sees index clear and no hold, proceeds (buggy)
-    - Fixed version creates a target hold on A, which fails because the hold exists.
+    Simulate the hold visibility race.
+    
+    Manually sets up the global state as if User1 changed A->B, then sets up
+    User2's cache to see the index clear but not the hold, deterministically
+    triggering the race without relying on the buggy version's User1 change
+    to set up the state correctly.
     """
     results = []
     
+    # Manually set up the global state as if Bob changed Bob->Robert:
+    # - Hold on Bob exists in global table (not expired)
+    # - Bob index does NOT exist in global table (deleted)
+    # - Robert index exists, pointing to Bob
+    # - Bob's user.blob username = "Robert"
+    from db.tables import UsernameHoldEntry, UsernameIndexEntry
+    now = time.time()
+    username_hold_table._data["Bob"] = UsernameHoldEntry(
+        user_id=1, time_created=now, time_expired=now + 3.0
+    )
+    if "Bob" in username_index_table._data:
+        del username_index_table._data["Bob"]
+    username_index_table._data["Robert"] = UsernameIndexEntry(user_id=1, time_created=now)
+    if 1 in user_blob_table._data:
+        user_blob_table._data[1].username = "Robert"
+    
+    results.append(("Bob", True))
+    
     disable_auto_cache()
     
-    # Bob changes to Robert, creating hold on Bob and deleting Bob index
-    success, msg = change_username_fn(1, "Robert")
-    results.append(("Bob", success))
-    
-    # Alice's cache is stale (auto updates disabled). Manually set up the exact
-    # stale state we want:
+    # Alice's cache is stale. Manually set up the exact stale state:
     # - Bob index does NOT exist in Alice's cache (she sees Bob as available)
     # - Bob hold does NOT exist in Alice's cache (she does not see the hold)
-    # The global table has the Bob hold and no Bob index. Alice's cache should
-    # reflect the stale state before Bob's change.
     from db.read_cache import _thread_local
     if hasattr(_thread_local, 'caches'):
         for key, cache in list(_thread_local.caches.items()):
             if "username_index" in key:
-                # Remove Bob from the index cache (simulating the index deletion
-                # has propagated, but the hold has not)
                 if "Bob" in cache._cache:
                     del cache._cache["Bob"]
             if "username_hold" in key:
-                # Ensure Bob hold is NOT in the hold cache (stale, not updated)
                 if "Bob" in cache._cache:
                     del cache._cache["Bob"]
-            # Do not update user.blob cache - not needed for this race
     
     # Alice tries to take Bob. Her cache sees no Bob index (available) and no hold.
     # The buggy version will proceed and successfully take Bob, violating the hold.
