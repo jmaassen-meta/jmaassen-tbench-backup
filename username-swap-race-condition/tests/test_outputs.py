@@ -55,7 +55,7 @@ def test_service_uses_only_allowed_apis():
 
     tree = ast.parse(source)
 
-    allowed_modules = {"time", "typing", "db.db_api", "config"}
+    allowed_modules = {"time", "typing", "db.db_api", "config", "db.clock"}
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -93,6 +93,11 @@ def test_service_uses_only_allowed_apis():
                     )
 
     # Also check that the source doesn't contain importlib or __import__ strings
+    # Note: These string checks are intentionally strict to prevent bypassing
+    # the import restriction via importlib.import_module() or __import__().
+    # The DB module is hidden in site-packages, but a cheating agent might
+    # try to import it directly using importlib. These checks ensure the
+    # service only uses the public API in db.db_api.
     assert "importlib" not in source, (
         "Service contains 'importlib' which is not allowed. "
         "The service can ONLY use the defined APIs in db.db_api."
@@ -101,6 +106,32 @@ def test_service_uses_only_allowed_apis():
         "Service contains '__import__' which is not allowed. "
         "The service can ONLY use the defined APIs in db.db_api."
     )
+
+    # Check the imported module's namespace for any disallowed modules that
+    # may have been imported dynamically via builtins tricks like
+    # builtins'imp'+'ort' or getattr(builtins, 'import_module').
+    # This catches dynamic imports that bypass the AST and string checks.
+    import username_service
+    import types
+
+    for name, value in username_service.__dict__.items():
+        if isinstance(value, types.ModuleType):
+            module_name = value.__name__
+            # Allow the modules that the service is supposed to import
+            if module_name in ("time", "typing", "db.db_api", "config", "db.clock"):
+                continue
+            # Allow the db package itself (imported as part of db.db_api)
+            if module_name == "db":
+                continue
+            # Disallow any other modules, especially threading, db.tables, etc.
+            # A cheating service might smuggle threading via builtins tricks and
+            # wrap everything in a global lock, passing the tests without using
+            # the atomic changeset or target hold. This check prevents that.
+            assert False, (
+                f"Service has disallowed module '{module_name}' in its namespace (imported as '{name}'). "
+                f"The service can ONLY use the defined APIs in db.db_api, not direct table access or threading. "
+                f"A service smuggling threading and wrapping everything in a global lock is not allowed."
+            )
 
     print("✓ test_service_uses_only_allowed_apis passed")
 
