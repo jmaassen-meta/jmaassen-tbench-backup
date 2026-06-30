@@ -12,17 +12,11 @@ The service must use the atomic changeset API to make multi-table updates atomic
 
 ## Completion Rates
 - Oracle: 3/3 passed (100%)
-- Sonnet 4.6: 4/5 passed (80%)
 - Opus 4.6: 4/5 passed (80%)
 - Avocado: 4/5 passed (80%)
 - GPT-5.5 (Codex): 0/5 passed (0%)
 
 ## Model Analysis
-
-**Sonnet 4.6: 4/5 passed**
-- 4 trials passed by correctly using the atomic changeset API to wrap steps 4-7 and creating a target hold for the target username to prevent the dangling pointer race.
-- 1 trial failed because the agent did not properly clean up the old username hold on failure. When a change fails after creating the old hold, the hold remains and blocks future attempts by the same user. The agent's solution did not delete the old hold before returning False in step 3, leaving a leftover hold on the user's old username.
-- The failure reflects a reasoning gap about resource cleanup on failure paths, not a task setup issue.
 
 **Opus 4.6: 4/5 passed**
 - 4 trials passed by correctly using the atomic changeset API and creating a target hold to prevent the dangling pointer race.
@@ -42,7 +36,6 @@ The service must use the atomic changeset API to make multi-table updates atomic
 **Failure categorization across all models:**
 - **Missing atomic changeset**: 1 failure (Opus) - Agent did not wrap steps 4-7 in an atomic changeset, leaving the multi-table updates vulnerable to interleaving.
 - **Incorrect hold expire time**: 1 failure (Avocado) - Agent used calculated time instead of actual hold time_expired when deleting, causing the delete to not match.
-- **Missing hold cleanup**: 1 failure (Sonnet) - Agent did not clean up the old username hold on failure, leaving a leftover hold that blocked future attempts.
 
 **Why these failures reflect reasoning gaps:**
 - The task clearly describes the three tables, the read cache eventual consistency, and the available DB APIs including the atomic changeset. The agent must understand that the 7 steps are not atomic and that concurrent operations can interleave.
