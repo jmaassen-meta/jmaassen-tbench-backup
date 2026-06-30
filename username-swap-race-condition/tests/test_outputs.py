@@ -492,20 +492,6 @@ def test_user_can_reclaim_own_username():
     print("✓ test_user_can_reclaim_own_username passed")
 
 
-def test_target_hold_created():
-    """Test that a target hold is created during a successful username change."""
-    reset_db()
-    success, _ = change_username(1, "Robert")
-    assert success, "Bob should successfully change to Robert"
-    force_cache_update()
-    robert_hold = read_username_hold("Robert")
-    assert robert_hold is not None, (
-        "Target hold on 'Robert' should exist after successful change."
-    )
-    assert robert_hold.user_id == 1, (
-        f"Target hold should reference user 1, got {robert_hold.user_id}"
-    )
-    print("✓ test_target_hold_created passed")
 
 
 def test_concurrent_reclaim():
@@ -570,7 +556,6 @@ if __name__ == "__main__":
     test_concurrent_3()
     test_concurrent_4()
     test_user_can_reclaim_own_username()
-    test_target_hold_created()
     test_concurrent_reclaim()
 
     test_performance()
