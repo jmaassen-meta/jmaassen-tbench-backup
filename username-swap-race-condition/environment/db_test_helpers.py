@@ -24,15 +24,47 @@ from db.read_cache import get_client_cache, ReadCache
 
 
 def reset_db_hidden():
-    """Reset DB to initial state. Hidden implementation."""
+    """
+    Reset DB to initial state. Hidden implementation.
+
+    Goes to manual cache control, forces a refresh with the fresh DB state,
+    then sets back to auto. This ensures the cache has the correct initial
+    state without relying on timing.
+
+    Also sets the initial indexes to have old timestamps, so that when a
+    dangling pointer scenario is set up, the stale index in the cache will
+    have an old time_created, ensuring the dangling pointer age is greater
+    than the lockout period. This makes the race conditions reliably trigger
+    without the lockout blocking prematurely.
+    """
+    from db.read_cache import _thread_local
+
+    # Go to manual to prevent auto updates during reset
+    ReadCache.disable_auto_update()
+
+    # Clear all state
     username_index_table._data.clear()
     username_hold_table._data.clear()
     user_blob_table._data.clear()
-    from db.read_cache import _thread_local
 
+    # Clear thread-local caches to ensure fresh caches for this test
     if hasattr(_thread_local, "caches"):
         _thread_local.caches.clear()
+
+    # Re-initialize the premade users
     init_premade_users()
+
+    # Set the initial indexes to have old timestamps, so dangling pointers
+    # are old and the lockout does not block. This ensures the race conditions
+    # are reliably triggered.
+    old_time = time.time() - 10.0  # 10 seconds ago, older than the 1.0s lockout
+    for username, entry in username_index_table._data.items():
+        entry.time_created = old_time
+
+    # Force a cache refresh with the fresh DB state (while still in manual mode)
+    force_cache_update()
+
+    # Set back to auto for normal test execution (unless a specific test disables it)
     ReadCache.enable_auto_update()
     time.sleep(0.1)
     force_cache_update()
