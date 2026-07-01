@@ -23,12 +23,52 @@ The task includes 13 tests:
 - API restriction: Service can only use allowed DB APIs, no direct table access
 
 ## Completion Rates
+
+**Previous version results (before hardening):**
 - Oracle: 3/3 passed (100%)
 - Opus 4.6: 4/5 passed (80%)
 - Avocado: 4/5 passed (80%)
 - GPT-5.5 (Codex): 0/5 passed (0%)
 
-*Note: Results from previous version. The task has since been made harder with stricter performance requirements, generic error messages, an additional rapid chained changes test, and DB implementation hiding. The core solution remains the same.*
+**Current version:** The task has been significantly hardened since those runs (see Key Differences below). No new trial runs have been conducted on the hardened version yet. The core solution remains the same (atomic changeset + target hold), but agents now have much less information to work with.
+
+### Key Differences from Previous Version
+
+The current version is significantly harder than the version used for the above results:
+
+1. **DB implementation completely hidden** (was visible):
+   - **Before**: Agent could read `/usr/local/lib/python3.12/site-packages/db/tables.py`, `changeset.py`, `read_cache.py`, `lock_manager.py` to understand table structures, locking, backup/revert logic, and cache staleness handling.
+   - **After**: Only the `db_api.py` interface stub (function signatures and docstrings, no implementation) is visible. The real implementation is in `tests/db/` which is only mounted at test time, not during agent execution. Agents must reason about the system from the API documentation and buggy code alone.
+
+2. **Test helpers with solution hints no longer visible** (was visible):
+   - **Before**: `db_test_helpers.py` was copied to site-packages, allowing agents to read detailed descriptions like: "Fixed version creates a target hold on Bob as part of the atomic changeset, which fails because the Bob hold already exists in the global table."
+   - **After**: Test helpers are in `tests/db_test_helpers.py`, which is only mounted at `/tests` at test time, not available during agent execution. Agents cannot read the race condition descriptions or solution hints.
+
+3. **Performance test 12x stricter**:
+   - **Before**: 50 updates in 60 seconds (very lenient; naive waiting solutions could pass)
+   - **After**: 100 updates in 5 seconds (a correct solution completes in <1s; naive solutions that wait for cache intervals take 50+ seconds and fail, solutions that wait for holds take 300+ seconds and fail)
+
+4. **Generic error messages** (was descriptive):
+   - **Before**: "Dangling pointer too recent, lockout period not expired", "Target username has active hold by user 1", "Failed to create username index (race condition: someone else claimed it)"
+   - **After**: All errors are generic "Username not available". Agents cannot infer the solution from error message hints.
+
+5. **Additional rapid chained changes test**:
+   - **New test**: `test_rapid_chained_changes` - Bob changes Bob->Robert->Bobby->Bob rapidly while Alice tries to claim intermediate names. Tests proper hold chaining, reclaim of own username, and system consistency. The buggy version fails this test because Bob cannot reclaim Robert (his own hold blocks him).
+
+6. **Instruction significantly less explicit**:
+   - **Before**: Structured "core rules" list with precise language, explicit "dangling pointer" term and detailed explanation, "eventual consistency is fine" reassurance, explicit hold reclaim rule ("The user can claim it back before the hold expires"), detailed table operation semantics ("Create fails if exists", "Delete is idempotent"), verification bullet points hinting at test scenarios, explicit performance warning.
+   - **After**: Narrative paragraph instead of bulleted rules, no "dangling pointer" term (just describes the scenario without naming it), no eventual consistency reassurance, hold rule less explicit (doesn't state user can reclaim own username), simplified table descriptions (just what they store, not operation semantics), no verification bullets, shorter atomic changeset description, no performance warning. Agents must extract rules from the narrative, infer concepts from the code, and reason about consistency without reassurance.
+
+### Predicted Impact on Pass Rates
+
+The hardening changes significantly increase difficulty:
+
+- **Oracle**: Expected to remain 3/3 (100%) - the oracle solution is correct and handles all cases.
+- **Opus 4.6**: Expected to drop from 4/5 (80%) - Previously, 1 failure from not using atomic changeset. With hidden implementation, no test helper hints, less explicit instruction, and stricter performance test, more agents may fail to figure out the atomic changeset + target hold solution. The new rapid chained test may also catch additional issues with hold cleanup.
+- **Avocado**: Expected to drop from 4/5 (80%) - Similar reasons. The previous failure was from incorrect hold expire time matching; with less explicit API documentation (only stub visible), more agents may make this mistake. The generic error messages provide less feedback for debugging.
+- **GPT-5.5**: Expected to remain 0/5 or very low - The task was already too hard for this model, and the hardening makes it even more challenging.
+
+The core solution remains unchanged (atomic changeset + target hold for the target username), but agents now have much less information to work with and must reason more deeply about the distributed systems concepts from the API interface and buggy code alone.
 
 ## Model Analysis
 
