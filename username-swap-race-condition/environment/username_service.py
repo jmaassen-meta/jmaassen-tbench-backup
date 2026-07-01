@@ -74,10 +74,7 @@ def change_username(user_id: int, target_username: str) -> Tuple[bool, str]:
     if target_hold:
         now = time.time()
         if target_hold.time_expired > now:
-            return (
-                False,
-                f"Target username has active hold by user {target_hold.user_id}",
-            )
+            return False, "Username not available"
 
     dangling_pointer = None
     if target_index:
@@ -85,13 +82,10 @@ def change_username(user_id: int, target_username: str) -> Tuple[bool, str]:
         if target_user and target_user.username != target_username:
             age = time.time() - target_index.time_created
             if age < DANGLING_POINTER_LOCKOUT:
-                return False, "Dangling pointer too recent, lockout period not expired"
+                return False, "Username not available"
             dangling_pointer = target_index
         else:
-            return (
-                False,
-                f"Target username already taken by user {target_index.user_id}",
-            )
+            return False, "Username not available"
 
     if target_hold:
         now = time.time()
@@ -104,13 +98,10 @@ def change_username(user_id: int, target_username: str) -> Tuple[bool, str]:
         delete_username_index(target_username, dangling_pointer.user_id)
 
     if not create_username_index(target_username, user_id):
-        return (
-            False,
-            "Failed to create username index (race condition: someone else claimed it)",
-        )
+        return False, "Username not available"
 
     if not update_user_username(user_id, target_username):
-        return False, "Failed to update user username"
+        return False, "Username not available"
 
     delete_username_index(current_username, user_id)
 
