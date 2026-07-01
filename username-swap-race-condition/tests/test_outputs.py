@@ -20,10 +20,12 @@ import sys
 import ast
 
 # Add site-packages to path so db module can be found when running with uvx
+# Add /tests first so the real db implementation in /tests/db/ shadows the stub in site-packages
+# NOTE: /tests must be inserted AFTER site-packages so it ends up at position 0
 sys.path.insert(0, "/usr/local/lib/python3.12/site-packages")
+sys.path.insert(0, "/tests")
 sys.path.insert(0, "/app")
 sys.path.insert(0, "/db")
-sys.path.insert(0, "/tests")
 
 from db.db_api import (
     read_user_by_id,
