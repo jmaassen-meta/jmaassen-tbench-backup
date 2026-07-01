@@ -23,6 +23,7 @@ import ast
 sys.path.insert(0, "/usr/local/lib/python3.12/site-packages")
 sys.path.insert(0, "/app")
 sys.path.insert(0, "/db")
+sys.path.insert(0, "/tests")
 
 from db.db_api import (
     read_user_by_id,
@@ -34,7 +35,7 @@ from db.db_api import (
     get_cache_update_interval,
 )
 from db.tables import username_index_table, username_hold_table, user_blob_table
-from db.test_helpers import (
+from db_test_helpers import (
     force_cache_update,
     reset_db_hidden,
     run_concurrent_1,
@@ -395,7 +396,7 @@ def test_concurrent_4():
 
     # Disable auto cache updates BEFORE Bob's change, so the cache remains stale
     # after Bob's change and does not see the Bob hold.
-    from db.test_helpers import (
+    from db_test_helpers import (
         disable_auto_cache,
         enable_auto_cache,
         force_cache_update,
