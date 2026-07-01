@@ -1,13 +1,5 @@
 schema_version = "1.1"
 
-[task]
-name = "codimango/username-swap-race-condition"
-format = "terminal_bench_single_turn"
-workstream = "swe_public_repo"
-description = "Fix race condition in username swap between users across three DB tables"
-authors = [{ name = "jmaassen", email = "jmaassen@meta.com" }]
-keywords = ["race-condition", "concurrency", "database", "username"]
-
 [metadata]
 author_name = "jmaassen"
 author_email = "jmaassen@meta.com"
