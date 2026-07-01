@@ -44,35 +44,47 @@ class AtomicChangeset:
         BLOCKS: Deleting and writing the same data in the same changeset is not
         allowed. For example, delete_username_index("bob", 123) followed by
         create_username_index("bob", 123) in the same changeset will be blocked.
-        This is tracked by the operation args (username+user_id for index/hold,
-        user_id for user blob). This prevents using delete/create as a way to
-        bypass the "create should fail if pkey exists" rule.
+        Similarly, create then delete of the same username is also blocked.
+        This is tracked by the username for index/hold operations (regardless of
+        user_id), and by user_id for user blob operations. This prevents using
+        delete/create or create/delete as a way to bypass the "create should fail
+        if pkey exists" rule or as a master read stand-in to check if a key exists.
         """
         # Check for delete/create of the same data in the same changeset
         # This is not allowed in a real prod setting.
-        # For holds, the hold_expire_time is included in the args key, so delete/create
-        # with different expire times is allowed (e.g., to refresh/extend the hold time
-        # after a re-claim). If the expire times are the same, it's blocked.
-        seen_args = set()
+        # For index and hold, any create/delete on the same username in the same
+        # changeset is blocked, regardless of user_id. This prevents using
+        # create/delete as a master read stand-in (e.g., create "bob" with user 123,
+        # then delete "bob" with user 456 to check if "bob" exists).
+        # Delete then create on the same username IS allowed (e.g., delete the old
+        # dangling pointer, then create the new index). But create then delete is
+        # NOT allowed, as it's likely a read stand-in.
+        # For holds, the hold_expire_time is NOT included in the args key, so
+        # delete/create with different expire times is also blocked. The only
+        # allowed way to refresh a hold is to delete the old hold (with its actual
+        # expire time) and create a new hold (with the new expire time) in separate
+        # changesets, or to use the same expire time for both operations.
+        # For user_blob, multiple updates to the same user_id are blocked.
+        seen_args = {}
         for op in self.operations:
             if op["op"] in ("create_username_index", "delete_username_index"):
-                args_key = ("username_index", op["username"], op["user_id"])
+                args_key = ("username_index", op["username"])
+                op_type = "create" if "create" in op["op"] else "delete"
             elif op["op"] in ("create_username_hold", "delete_username_hold"):
-                args_key = (
-                    "username_hold",
-                    op["username"],
-                    op["user_id"],
-                    op["hold_expire_time"],
-                )
+                args_key = ("username_hold", op["username"])
+                op_type = "create" if "create" in op["op"] else "delete"
             elif op["op"] == "update_user_username":
                 args_key = ("user_blob", op["user_id"])
+                op_type = "update"
             else:
                 continue
 
             if args_key in seen_args:
-                # Duplicate operation on the same data - block the changeset
-                return False
-            seen_args.add(args_key)
+                prev_op_type = seen_args[args_key]
+                # Allow delete then create, but not create then delete or other combos
+                if not (prev_op_type == "delete" and op_type == "create"):
+                    return False
+            seen_args[args_key] = op_type
 
         with lock_manager.acquire(list(self.pkeys)):
             backup = self._backup_state()
