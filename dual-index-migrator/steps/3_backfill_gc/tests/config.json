@@ -1,0 +1,36 @@
+{
+  "repo": "<owner>/<repo>",
+  "instance_id": "",
+  "base_commit": "<base_commit_sha>",
+  "patch": "",
+  "test_patch": "",
+  "fail_to_pass": [
+    "tests/test_backfill.py::test_backfill_verification_single",
+    "tests/test_backfill.py::test_backfill_does_not_create_missing_blob",
+    "tests/test_backfill.py::test_verify_consistent_after_link",
+    "tests/test_backfill.py::test_gc_repairs_username_mismatch_available",
+    "tests/test_backfill.py::test_gc_repairs_username_mismatch_not_available",
+    "tests/test_backfill.py::test_backfill_skips_locked",
+    "tests/test_backfill.py::test_verify_detects_universe_mismatch",
+    "tests/test_backfill.py::test_link_creates_blobs_with_universe",
+    "tests/test_backfill.py::test_rename_updates_blobs",
+    "tests/test_cli_backfill.py::test_cli_backfill_verify",
+    "tests/test_cli_backfill.py::test_cli_gc_repairs_dangling",
+    "tests/test_cli_backfill.py::test_cli_user_store_universe_immutable",
+    "tests/test_cli_backfill.py::test_cli_backfill_idempotent",
+    "tests/test_user_store.py::test_put_get_roundtrip",
+    "tests/test_user_store.py::test_put_invalid_universe",
+    "tests/test_user_store.py::test_put_universe_immutable",
+    "tests/test_user_store.py::test_put_uid_mismatch",
+    "tests/test_user_store.py::test_put_invalid_username",
+    "tests/test_user_store.py::test_get_absent_returns_none",
+    "tests/test_user_store.py::test_shards"
+  ],
+  "pass_to_pass": [],
+  "selected_test_files_to_run": [
+    "tests/test_backfill.py",
+    "tests/test_cli_backfill.py",
+    "tests/test_user_store.py"
+  ],
+  "before_repo_set_cmd": ""
+}

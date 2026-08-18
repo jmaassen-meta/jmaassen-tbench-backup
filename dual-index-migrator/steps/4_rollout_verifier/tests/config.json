@@ -1,0 +1,25 @@
+{
+  "repo": "<owner>/<repo>",
+  "instance_id": "",
+  "base_commit": "<base_commit_sha>",
+  "patch": "",
+  "test_patch": "",
+  "fail_to_pass": [
+    "tests/test_cli_rollout.py::test_cli_rollout_phases",
+    "tests/test_cli_rollout.py::test_cli_rollout_verify",
+    "tests/test_cli_rollout.py::test_cli_rollout_fails_if_locked",
+    "tests/test_cli_rollout.py::test_cli_rollout_monotonic",
+    "tests/test_rollout.py::test_rollout_status_not_started",
+    "tests/test_rollout.py::test_advance_rollout_canary_partial_full",
+    "tests/test_rollout.py::test_advance_rollout_fails_if_locked",
+    "tests/test_rollout.py::test_advance_rollout_monotonic",
+    "tests/test_rollout.py::test_advance_rollout_fails_if_inconsistent",
+    "tests/test_rollout.py::test_rollout_verify_overall"
+  ],
+  "pass_to_pass": [],
+  "selected_test_files_to_run": [
+    "tests/test_cli_rollout.py",
+    "tests/test_rollout.py"
+  ],
+  "before_repo_set_cmd": ""
+}

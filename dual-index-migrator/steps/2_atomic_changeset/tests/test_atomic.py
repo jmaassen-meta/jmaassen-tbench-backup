@@ -1,0 +1,231 @@
+import json
+import tempfile
+from pathlib import Path
+import pytest
+from dual_index.atomic import AtomicIndex
+from dual_index.shard import ShardStore
+
+
+def _get_ig_threads(base_dir, shards, username):
+    ig = ShardStore(str(Path(base_dir) / "ig"), shards)
+    threads = ShardStore(str(Path(base_dir) / "threads"), shards)
+    return ig.get(username), threads.get(username)
+
+
+def test_link_creates_both_universes():
+    with tempfile.TemporaryDirectory() as tmp:
+        idx = AtomicIndex(tmp, 4)
+        idx.link("alice", 100, 200)
+        ig, thr = _get_ig_threads(tmp, 4, "alice")
+        assert ig is not None
+        assert ig["ig_uid"] == 100
+        assert ig["link_state"] == "linked"
+        assert thr is not None
+        assert thr["uid"] == 200
+
+
+def test_link_updates_existing():
+    with tempfile.TemporaryDirectory() as tmp:
+        idx = AtomicIndex(tmp, 4)
+        idx.link("alice", 100, 200)
+        idx.link("alice", 101, 201)
+        ig, thr = _get_ig_threads(tmp, 4, "alice")
+        assert ig["ig_uid"] == 101
+        assert thr["uid"] == 201
+
+
+def test_unlink_removes_threads_and_updates_ig():
+    with tempfile.TemporaryDirectory() as tmp:
+        idx = AtomicIndex(tmp, 4)
+        idx.link("alice", 100, 200)
+        idx.unlink("alice")
+        ig, thr = _get_ig_threads(tmp, 4, "alice")
+        assert ig["link_state"] == "unlinked"
+        assert ig["threads_uid"] is None
+        assert thr is None
+
+
+def test_unlink_fails_if_not_exist():
+    with tempfile.TemporaryDirectory() as tmp:
+        idx = AtomicIndex(tmp, 4)
+        with pytest.raises(ValueError):
+            idx.unlink("nobody")
+
+
+def test_unlink_fails_if_already_unlinked():
+    with tempfile.TemporaryDirectory() as tmp:
+        idx = AtomicIndex(tmp, 4)
+        idx.link("alice", 100, 200)
+        idx.unlink("alice")
+        with pytest.raises(ValueError):
+            idx.unlink("alice")
+
+
+def test_rename_moves_both_universes():
+    with tempfile.TemporaryDirectory() as tmp:
+        idx = AtomicIndex(tmp, 4)
+        idx.link("bob", 100, 200)
+        idx.rename("bob", "alice")
+        # bob should be gone
+        assert idx.read("bob") is None
+        ig_alice, thr_alice = _get_ig_threads(tmp, 4, "alice")
+        assert ig_alice is not None
+        assert ig_alice["ig_uid"] == 100
+        assert thr_alice is not None
+        assert thr_alice["uid"] == 200
+        # from bob should be absent in both
+        ig_bob, thr_bob = _get_ig_threads(tmp, 4, "bob")
+        assert ig_bob is None
+        assert thr_bob is None
+
+
+def test_rename_fails_if_to_exists():
+    with tempfile.TemporaryDirectory() as tmp:
+        idx = AtomicIndex(tmp, 4)
+        idx.link("bob", 100, 200)
+        idx.link("alice", 300, 400)
+        with pytest.raises(ValueError):
+            idx.rename("bob", "alice")
+
+
+def test_rename_fails_if_from_absent():
+    with tempfile.TemporaryDirectory() as tmp:
+        idx = AtomicIndex(tmp, 4)
+        with pytest.raises(ValueError):
+            idx.rename("ghost", "alice")
+
+
+def test_rename_single_to_new():
+    with tempfile.TemporaryDirectory() as tmp:
+        # Use write_single via shard directly to create single in IG only
+        # Instead use AtomicIndex link then unlink to get single? Simpler: create via ShardStore
+        ig = ShardStore(str(Path(tmp) / "ig"), 4)
+        ig.put("bob", {"username": "bob", "uid": 100, "format": "single"})
+        idx = AtomicIndex(tmp, 4)
+        idx.rename("bob", "alice")
+        assert idx.read("alice") is not None
+        assert idx.read("alice")["username"] == "alice"
+        assert idx.read("bob") is None
+
+
+def test_hold_marker_blocks_link():
+    with tempfile.TemporaryDirectory() as tmp:
+        idx = AtomicIndex(tmp, 4)
+        # create hold marker
+        Path(tmp, ".hold_alice").touch()
+        with pytest.raises(ValueError):
+            idx.link("alice", 100, 200)
+        # after removing hold, should succeed
+        Path(tmp, ".hold_alice").unlink()
+        idx.link("alice", 100, 200)
+        assert idx.read("alice") is not None
+
+
+def test_hold_marker_blocks_rename():
+    with tempfile.TemporaryDirectory() as tmp:
+        idx = AtomicIndex(tmp, 4)
+        idx.link("bob", 100, 200)
+        Path(tmp, ".hold_alice").touch()
+        with pytest.raises(ValueError):
+            idx.rename("bob", "alice")
+        # alice hold should block, bob->charlie should work
+        Path(tmp, ".hold_alice").unlink()
+        idx.rename("bob", "alice")
+        assert idx.read("alice") is not None
+
+
+def test_rename_ordered_lock_no_deadlock():
+    # Hold on bob should not block rename alice->charlie (different users), but should block rename involving bob
+    with tempfile.TemporaryDirectory() as tmp:
+        idx = AtomicIndex(tmp, 4)
+        idx.link("alice", 100, 200)
+        idx.link("bob", 300, 400)
+        Path(tmp, ".hold_bob").touch()
+        # rename alice->charlie does not involve bob, should succeed
+        idx.rename("alice", "charlie")
+        assert idx.read("charlie") is not None
+        assert idx.read("alice") is None
+        # Now hold alice, rename bob->alice should fail (to_user held)
+        Path(tmp, ".hold_bob").unlink()
+        # recreate alice for second part
+        idx.link("alice", 100, 200)
+        Path(tmp, ".hold_alice").touch()
+        with pytest.raises(ValueError):
+            idx.rename("bob", "alice")  # to_user alice is held
+        Path(tmp, ".hold_alice").unlink()
+        # after releasing, should succeed
+        # need to ensure bob still exists and alice exists, so rename bob->dave should work
+        idx.rename("bob", "dave")
+        assert idx.read("dave") is not None
+
+
+def test_crash_recovery_link_pending():
+    with tempfile.TemporaryDirectory() as tmp:
+        idx = AtomicIndex(tmp, 4)
+        idx.link("alice", 100, 200)
+        # Simulate crash: write pending intent without commit
+        wal = Path(tmp) / "wal.jsonl"
+        # Find last intent? We'll manually append a pending link for bob without commit
+        import json, uuid
+
+        pending_id = str(uuid.uuid4())
+        with open(wal, "a") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "id": pending_id,
+                        "op": "link",
+                        "username": "bob",
+                        "old_ig": None,
+                        "old_threads": None,
+                        "state": "intent",
+                    },
+                    sort_keys=True,
+                )
+                + "\n"
+            )
+            # Simulate partial write: create bob in IG but not commit
+            ig = ShardStore(str(Path(tmp) / "ig"), 4)
+            ig.put(
+                "bob",
+                {
+                    "username": "bob",
+                    "ig_uid": 999,
+                    "threads_uid": 999,
+                    "link_state": "linked",
+                    "format": "dual",
+                },
+            )
+        # Next operation on bob should detect pending and recover (remove bob)
+        idx2 = AtomicIndex(tmp, 4)
+        with pytest.raises(ValueError):
+            idx2.link("bob", 1, 2)  # should detect pending and error
+        # After recovery, bob should be gone (since old was None)
+        assert idx2.read("bob") is None
+        # Now link should succeed
+        idx2.link("bob", 1, 2)
+        assert idx2.read("bob") is not None
+
+
+def test_link_invalid_username():
+    with tempfile.TemporaryDirectory() as tmp:
+        idx = AtomicIndex(tmp, 4)
+        with pytest.raises(ValueError):
+            idx.link("Alice", 100, 200)
+
+
+def test_read_returns_none_if_absent():
+    with tempfile.TemporaryDirectory() as tmp:
+        idx = AtomicIndex(tmp, 4)
+        assert idx.read("nobody") is None
+
+
+def test_read_after_link():
+    with tempfile.TemporaryDirectory() as tmp:
+        idx = AtomicIndex(tmp, 4)
+        idx.link("alice", 100, 200)
+        out = idx.read("alice")
+        assert out["username"] == "alice"
+        assert out["ig_uid"] == 100
+        assert out["threads_uid"] == 200
+        assert out["link_state"] == "linked"

@@ -1,0 +1,77 @@
+schema_version = "1.1"
+
+[task]
+name = "codimango/dual-index-migrator"
+description = "TAO-like secondary index dual-format migration: atomically migrate a sharded username index from single-format to dual-format (IG/Threads linked), with backfill verification, dangling-pointer GC, and GK-gated phased rollout. Inspired by TAC 20B ITAS migration and UsernameUpdateService 1.5B/day atomic cross-shard writes."
+format = "swe_bench_multi_turn"
+workstream = "swe_public_repo"
+authors = [{name = "Jeffrey Maassen", email = "jmaassen@meta.com"}]
+keywords = []
+
+[metadata]
+author_name = "Jeffrey Maassen"
+author_email = "jmaassen@meta.com"
+difficulty = "hard"
+category = "iterate_on_feature"
+category_usecase = "new_library"
+category_subdomain = "algorithms_and_data_structures"
+tags = ["multi-turn", "swe-bench-long-horizon-track", "greenfield", "data-infrastructure", "migration", "consistency"]
+reward_type = "binary"
+
+[environment]
+build_timeout_sec = 600.0
+cpus = 1
+memory_mb = 2048
+storage_mb = 10240
+gpus = 0
+allow_internet = true
+mcp_servers = []
+
+[environment.env]
+
+[[steps]]
+name = "1_dual_format_index"
+dependencies = []
+min_reward = 1.0
+
+[steps.verifier]
+timeout_sec = 600.0
+
+[steps.agent]
+timeout_sec = 600.0
+
+[[steps]]
+name = "2_atomic_changeset"
+dependencies = ["1_dual_format_index"]
+min_reward = 1.0
+inherit_prior_session = true
+
+[steps.verifier]
+timeout_sec = 600.0
+
+[steps.agent]
+timeout_sec = 600.0
+
+[[steps]]
+name = "3_backfill_gc"
+dependencies = ["2_atomic_changeset"]
+min_reward = 1.0
+inherit_prior_session = true
+
+[steps.verifier]
+timeout_sec = 600.0
+
+[steps.agent]
+timeout_sec = 600.0
+
+[[steps]]
+name = "4_rollout_verifier"
+dependencies = ["3_backfill_gc"]
+min_reward = 1.0
+inherit_prior_session = true
+
+[steps.verifier]
+timeout_sec = 600.0
+
+[steps.agent]
+timeout_sec = 600.0
