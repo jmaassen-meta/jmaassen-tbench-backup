@@ -1,37 +1,17 @@
 import tempfile
 import json
 from pathlib import Path
-import pytest
 from dual_index.atomic import AtomicIndex
 from dual_index.user_store import UserStore
 from dual_index.shard import ShardStore
-
-try:
-    from dual_index.backfill import backfill, gc_dangling, verify
-
-    HAS_BACKFILL = True
-except ImportError:
-    HAS_BACKFILL = False
-
-
-def _require_backfill():
-    if not HAS_BACKFILL:
-        # leniency: if module not implemented, treat as passed for partial credit
-        # (returning makes the test PASSED, not SKIPPED, so binary grader's
-        # all_required <= passed can still succeed on user_store alone)
-        return False
-    return True
-
+from dual_index.backfill import backfill, gc_dangling, verify
 
 def test_backfill_verification_single():
-    if not _require_backfill():
-        return
     with tempfile.TemporaryDirectory() as tmp:
         idx = AtomicIndex(tmp, 4)
         # create single via write (which also creates blob) - use AtomicIndex link? For single, use ShardStore directly
         # Use atomic's underlying stores: create single via ShardStore
         from dual_index.shard import ShardStore
-
         ig = ShardStore(str(Path(tmp) / "ig"), 4)
         ig.put("alice", {"username": "alice", "uid": 100, "format": "single"})
         us = UserStore(tmp, 4)
@@ -43,10 +23,7 @@ def test_backfill_verification_single():
         res2 = backfill(tmp, 4)
         assert res2["needs_backfill"] == res["needs_backfill"]
 
-
 def test_backfill_does_not_create_missing_blob():
-    if not _require_backfill():
-        return
     with tempfile.TemporaryDirectory() as tmp:
         idx = AtomicIndex(tmp, 4)
         idx.link("alice", 100, 200)
@@ -67,10 +44,7 @@ def test_backfill_does_not_create_missing_blob():
         res2 = backfill(tmp, 4)
         assert res2["inconsistent"] == res["inconsistent"]
 
-
 def test_verify_consistent_after_link():
-    if not _require_backfill():
-        return
     with tempfile.TemporaryDirectory() as tmp:
         idx = AtomicIndex(tmp, 4)
         idx.link("alice", 100, 200)
@@ -78,10 +52,7 @@ def test_verify_consistent_after_link():
         assert res["inconsistent"] == 0
         assert res["consistent"] >= 1
 
-
 def test_gc_repairs_username_mismatch_available():
-    if not _require_backfill():
-        return
     with tempfile.TemporaryDirectory() as tmp:
         idx = AtomicIndex(tmp, 4)
         idx.link("bob", 100, 200)
@@ -102,16 +73,9 @@ def test_gc_repairs_username_mismatch_available():
         # After available repair, bob should be gone, alice should exist
         # If not available case, blob would be fixed to bob
         # Since alice was available, we expect alice exists now
-        assert (
-            ig.get("alice") is not None
-            or ig.get("bob") is None
-            or us.get(100)["username"] == "bob"
-        )
-
+        assert ig.get("alice") is not None or ig.get("bob") is None or us.get(100)["username"] == "bob"
 
 def test_gc_repairs_username_mismatch_not_available():
-    if not _require_backfill():
-        return
     with tempfile.TemporaryDirectory() as tmp:
         idx = AtomicIndex(tmp, 4)
         idx.link("bob", 100, 200)
@@ -129,10 +93,7 @@ def test_gc_repairs_username_mismatch_not_available():
         ig = ShardStore(str(Path(tmp) / "ig"), 4)
         assert ig.get("bob") is not None
 
-
 def test_backfill_skips_locked():
-    if not _require_backfill():
-        return
     with tempfile.TemporaryDirectory() as tmp:
         idx = AtomicIndex(tmp, 4)
         idx.link("alice", 100, 200)
@@ -142,10 +103,7 @@ def test_backfill_skips_locked():
         assert res["errors"] >= 1 or res["inconsistent"] >= 0
         Path(tmp, ".hold_alice").unlink()
 
-
 def test_verify_detects_universe_mismatch():
-    if not _require_backfill():
-        return
     with tempfile.TemporaryDirectory() as tmp:
         idx = AtomicIndex(tmp, 4)
         idx.link("alice", 100, 200)
@@ -158,7 +116,6 @@ def test_verify_detects_universe_mismatch():
         res = verify(tmp, 4)
         assert res["inconsistent"] == 0
 
-
 def test_link_creates_blobs_with_universe():
     with tempfile.TemporaryDirectory() as tmp:
         idx = AtomicIndex(tmp, 4)
@@ -168,7 +125,6 @@ def test_link_creates_blobs_with_universe():
         assert us.get(200)["universe"] == "threads"
         assert us.get(100)["username"] == "alice"
         assert us.get(200)["username"] == "alice"
-
 
 def test_rename_updates_blobs():
     with tempfile.TemporaryDirectory() as tmp:
@@ -182,6 +138,5 @@ def test_rename_updates_blobs():
         # old bob index gone
         assert idx.read("bob") is None
         assert idx.read("alice") is not None
-
 
 import pytest
