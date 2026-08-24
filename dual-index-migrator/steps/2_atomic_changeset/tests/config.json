@@ -1,7 +1,7 @@
 {
-  "repo": "<owner>/<repo>",
+  "repo": "codimango/jmaassen-tbench",
   "instance_id": "",
-  "base_commit": "<base_commit_sha>",
+  "base_commit": "b6f13ef7766f52ad2a8aa37171180224f85c54d3",
   "patch": "",
   "test_patch": "",
   "fail_to_pass": [
@@ -21,6 +21,12 @@
     "tests/test_atomic.py::test_link_invalid_username",
     "tests/test_atomic.py::test_read_returns_none_if_absent",
     "tests/test_atomic.py::test_read_after_link",
+    "tests/test_atomic.py::test_rename_same_user_fails",
+    "tests/test_atomic.py::test_link_no_lock_left_after_success",
+    "tests/test_atomic.py::test_unlink_hold_marker_blocks",
+    "tests/test_atomic.py::test_rename_from_hold_blocks",
+    "tests/test_atomic.py::test_crash_recovery_rename_pending",
+    "tests/test_atomic.py::test_crash_recovery_unlink_pending",
     "tests/test_cli_atomic.py::test_cli_link_and_read",
     "tests/test_cli_atomic.py::test_cli_unlink",
     "tests/test_cli_atomic.py::test_cli_rename",

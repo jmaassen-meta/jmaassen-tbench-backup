@@ -229,3 +229,146 @@ def test_read_after_link():
         assert out["ig_uid"] == 100
         assert out["threads_uid"] == 200
         assert out["link_state"] == "linked"
+
+
+def test_rename_same_user_fails():
+    with tempfile.TemporaryDirectory() as tmp:
+        idx = AtomicIndex(tmp, 4)
+        idx.link("alice", 100, 200)
+        with pytest.raises(ValueError):
+            idx.rename("alice", "alice")
+
+
+def test_link_no_lock_left_after_success():
+    with tempfile.TemporaryDirectory() as tmp:
+        idx = AtomicIndex(tmp, 4)
+        idx.link("alice", 100, 200)
+        # lock file must be removed after success
+        assert not Path(tmp, ".lock_alice").exists()
+        # wal must have a commit marker
+        wal = Path(tmp) / "wal.jsonl"
+        assert wal.exists()
+        content = wal.read_text()
+        assert "commit" in content
+        assert "alice" in content
+
+
+def test_unlink_hold_marker_blocks():
+    with tempfile.TemporaryDirectory() as tmp:
+        idx = AtomicIndex(tmp, 4)
+        idx.link("alice", 100, 200)
+        Path(tmp, ".hold_alice").touch()
+        with pytest.raises(ValueError):
+            idx.unlink("alice")
+        Path(tmp, ".hold_alice").unlink()
+        idx.unlink("alice")
+        assert idx.read("alice")["link_state"] == "unlinked"
+
+
+def test_rename_from_hold_blocks():
+    with tempfile.TemporaryDirectory() as tmp:
+        idx = AtomicIndex(tmp, 4)
+        idx.link("bob", 100, 200)
+        Path(tmp, ".hold_bob").touch()
+        with pytest.raises(ValueError):
+            idx.rename("bob", "alice")
+        Path(tmp, ".hold_bob").unlink()
+        idx.rename("bob", "alice")
+        assert idx.read("alice") is not None
+
+
+def test_crash_recovery_rename_pending():
+    with tempfile.TemporaryDirectory() as tmp:
+        idx = AtomicIndex(tmp, 4)
+        idx.link("bob", 100, 200)
+        wal = Path(tmp) / "wal.jsonl"
+        import uuid, json
+
+        pending_id = str(uuid.uuid4())
+        ig = ShardStore(str(Path(tmp) / "ig"), 4)
+        threads = ShardStore(str(Path(tmp) / "threads"), 4)
+        old_ig = ig.get("bob")
+        old_thr = threads.get("bob")
+        with open(wal, "a") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "id": pending_id,
+                        "op": "rename",
+                        "from_user": "bob",
+                        "to_user": "alice",
+                        "old_from_ig": old_ig,
+                        "old_from_threads": old_thr,
+                        "old_to_ig": None,
+                        "old_to_threads": None,
+                        "state": "intent",
+                    },
+                    sort_keys=True,
+                )
+                + "\n"
+            )
+            # partial: create alice, delete bob partially (only IG)
+            ig.put(
+                "alice",
+                {
+                    "username": "alice",
+                    "ig_uid": 100,
+                    "threads_uid": 200,
+                    "link_state": "linked",
+                    "format": "dual",
+                },
+            )
+        idx2 = AtomicIndex(tmp, 4)
+        with pytest.raises(ValueError):
+            idx2.rename("bob", "alice")
+        # after recovery, bob should exist, alice should not
+        assert idx2.read("bob") is not None
+        assert idx2.read("alice") is None
+        idx2.rename("bob", "alice")
+        assert idx2.read("alice") is not None
+
+
+def test_crash_recovery_unlink_pending():
+    with tempfile.TemporaryDirectory() as tmp:
+        idx = AtomicIndex(tmp, 4)
+        idx.link("alice", 100, 200)
+        wal = Path(tmp) / "wal.jsonl"
+        import uuid, json
+
+        pending_id = str(uuid.uuid4())
+        ig = ShardStore(str(Path(tmp) / "ig"), 4)
+        threads = ShardStore(str(Path(tmp) / "threads"), 4)
+        old_ig = ig.get("alice")
+        old_thr = threads.get("alice")
+        with open(wal, "a") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "id": pending_id,
+                        "op": "unlink",
+                        "username": "alice",
+                        "old_ig": old_ig,
+                        "old_threads": old_thr,
+                        "state": "intent",
+                    },
+                    sort_keys=True,
+                )
+                + "\n"
+            )
+            # partial: delete threads entry, update ig to unlinked partially
+            # simulate crash after deleting threads but before committing
+            from pathlib import Path as _P
+
+            thr_path = threads._shard_path("alice")
+            thr_data = threads._load_shard(thr_path)
+            thr_data.pop("alice", None)
+            threads._save_shard(thr_path, thr_data)
+        idx2 = AtomicIndex(tmp, 4)
+        with pytest.raises(ValueError):
+            idx2.unlink("alice")
+        # after recovery, alice should be back linked
+        out = idx2.read("alice")
+        assert out is not None
+        assert out["link_state"] == "linked"
+        idx2.unlink("alice")
+        assert idx2.read("alice")["link_state"] == "unlinked"

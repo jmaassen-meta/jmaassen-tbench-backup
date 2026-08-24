@@ -1,7 +1,7 @@
 {
-  "repo": "",
+  "repo": "codimango/jmaassen-tbench",
   "instance_id": "dual-index-migrator",
-  "base_commit": "",
+  "base_commit": "b6f13ef7766f52ad2a8aa37171180224f85c54d3",
   "patch": "",
   "test_patch": "",
   "fail_to_pass": [],

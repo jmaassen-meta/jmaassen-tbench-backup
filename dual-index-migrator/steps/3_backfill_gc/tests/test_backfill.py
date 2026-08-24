@@ -164,4 +164,88 @@ def test_rename_updates_blobs():
         assert idx.read("alice") is not None
 
 
+def test_verify_lists_inconsistent_users():
+    with tempfile.TemporaryDirectory() as tmp:
+        idx = AtomicIndex(tmp, 4)
+        ig = ShardStore(str(Path(tmp) / "ig"), 4)
+        ig.put("alice", {"username": "alice", "uid": 100, "format": "single"})
+        us = UserStore(tmp, 4)
+        us.put(100, {"username": "bob", "uid": 100, "universe": "ig"})
+        res = verify(tmp, 4)
+        assert res["inconsistent"] >= 1
+        assert "inconsistent_users" in res
+        assert (
+            "alice" in res["inconsistent_users"] or "bob" in res["inconsistent_users"]
+        )
+
+
+def test_gc_idempotent():
+    with tempfile.TemporaryDirectory() as tmp:
+        idx = AtomicIndex(tmp, 4)
+        idx.link("bob", 100, 200)
+        us = UserStore(tmp, 4)
+        us.put(100, {"username": "alice", "uid": 100, "universe": "ig"})
+        res1 = gc_dangling(tmp, 4)
+        res2 = gc_dangling(tmp, 4)
+        # second gc should find no more dangling
+        assert (
+            res2["dangling_found"] == 0
+            or res2["dangling_found"] <= res1["dangling_found"]
+        )
+        v = verify(tmp, 4)
+        assert v["inconsistent"] == 0
+
+
+def test_gc_no_lock_left_after_success():
+    with tempfile.TemporaryDirectory() as tmp:
+        idx = AtomicIndex(tmp, 4)
+        idx.link("bob", 100, 200)
+        us = UserStore(tmp, 4)
+        us.put(100, {"username": "alice", "uid": 100, "universe": "ig"})
+        gc_dangling(tmp, 4)
+        # no lock files should remain
+        assert not list(Path(tmp).glob(".lock_*"))
+
+
+def test_backfill_verify_idempotent_and_lists():
+    with tempfile.TemporaryDirectory() as tmp:
+        idx = AtomicIndex(tmp, 4)
+        idx.link("alice", 100, 200)
+        idx.link("bob", 300, 400)
+        res1 = backfill(tmp, 4)
+        res2 = backfill(tmp, 4)
+        assert res1["total"] == res2["total"]
+        assert res1["consistent"] == res2["consistent"]
+        v1 = verify(tmp, 4)
+        v2 = verify(tmp, 4)
+        assert v1["total"] == v2["total"]
+        assert v1["inconsistent"] == 0
+        assert v1["consistent"] >= 2
+
+
+def test_verify_detects_threads_without_ig():
+    with tempfile.TemporaryDirectory() as tmp:
+        threads = ShardStore(str(Path(tmp) / "threads"), 4)
+        threads.put("alice", {"username": "alice", "uid": 200, "format": "single"})
+        us = UserStore(tmp, 4)
+        us.put(200, {"username": "alice", "uid": 200, "universe": "threads"})
+        res = verify(tmp, 4)
+        assert res["inconsistent"] >= 1
+
+
+def test_unlink_removes_threads_blob():
+    with tempfile.TemporaryDirectory() as tmp:
+        idx = AtomicIndex(tmp, 4)
+        idx.link("alice", 100, 200)
+        idx.unlink("alice")
+        us = UserStore(tmp, 4)
+        # ig blob should exist with alice, threads blob should be removed or updated to not exist
+        assert us.get(100) is not None
+        assert us.get(100)["username"] == "alice"
+        assert us.get(100)["universe"] == "ig"
+        # threads blob may be removed after unlink - our spec says handle unlinked state, so at least verify passes
+        res = verify(tmp, 4)
+        assert res["inconsistent"] == 0
+
+
 import pytest

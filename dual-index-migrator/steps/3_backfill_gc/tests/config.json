@@ -1,7 +1,7 @@
 {
-  "repo": "<owner>/<repo>",
+  "repo": "codimango/jmaassen-tbench",
   "instance_id": "",
-  "base_commit": "<base_commit_sha>",
+  "base_commit": "b6f13ef7766f52ad2a8aa37171180224f85c54d3",
   "patch": "",
   "test_patch": "",
   "fail_to_pass": [
@@ -14,6 +14,12 @@
     "tests/test_backfill.py::test_verify_detects_universe_mismatch",
     "tests/test_backfill.py::test_link_creates_blobs_with_universe",
     "tests/test_backfill.py::test_rename_updates_blobs",
+    "tests/test_backfill.py::test_verify_lists_inconsistent_users",
+    "tests/test_backfill.py::test_gc_idempotent",
+    "tests/test_backfill.py::test_gc_no_lock_left_after_success",
+    "tests/test_backfill.py::test_backfill_verify_idempotent_and_lists",
+    "tests/test_backfill.py::test_verify_detects_threads_without_ig",
+    "tests/test_backfill.py::test_unlink_removes_threads_blob",
     "tests/test_cli_backfill.py::test_cli_backfill_verify",
     "tests/test_cli_backfill.py::test_cli_gc_repairs_dangling",
     "tests/test_cli_backfill.py::test_cli_user_store_universe_immutable",

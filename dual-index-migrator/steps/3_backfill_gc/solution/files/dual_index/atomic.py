@@ -9,6 +9,7 @@ WAL_NAME = "wal.jsonl"
 LOCK_PREFIX = ".lock_"
 HOLD_PREFIX = ".hold_"
 
+
 class AtomicIndex:
     def __init__(self, base_dir, num_shards):
         self.base_dir = Path(base_dir)
@@ -197,7 +198,14 @@ class AtomicIndex:
                     self.ig_store.put(to_user, old_to_ig)
                     if old_to_threads is not None:
                         self.threads_store.put(to_user, old_to_threads)
-        filtered = [e for e in entries if not (e.get("state") == "intent" and e.get("id") in {x["id"] for x in to_recover})]
+        filtered = [
+            e
+            for e in entries
+            if not (
+                e.get("state") == "intent"
+                and e.get("id") in {x["id"] for x in to_recover}
+            )
+        ]
         with open(self.wal_path, "w") as f:
             for e in filtered:
                 f.write(json.dumps(e, sort_keys=True) + "\n")
@@ -237,6 +245,7 @@ class AtomicIndex:
             old_threads = self.threads_store.get(username)
             rec = encoding.encode_dual(username, ig_uid, threads_uid, "linked")
             import uuid
+
             intent_id = str(uuid.uuid4())
             intent = {
                 "id": intent_id,
@@ -246,7 +255,7 @@ class AtomicIndex:
                 "old_threads": old_threads,
                 "new_ig_uid": ig_uid,
                 "new_threads_uid": threads_uid,
-                "state": "intent"
+                "state": "intent",
             }
             self._wal_append(intent)
             # Verify blob universe before writing (should not mutate)
@@ -258,10 +267,17 @@ class AtomicIndex:
             if existing_thr_blob and existing_thr_blob.get("universe") != "threads":
                 raise ValueError(f"blob {threads_uid} universe mismatch")
             self.ig_store.put(username, rec)
-            self.threads_store.put(username, {"username": username, "uid": threads_uid, "format": "single"})
+            self.threads_store.put(
+                username, {"username": username, "uid": threads_uid, "format": "single"}
+            )
             # Create blobs atomically
-            self.user_store.put(ig_uid, {"username": username, "uid": ig_uid, "universe": "ig"})
-            self.user_store.put(threads_uid, {"username": username, "uid": threads_uid, "universe": "threads"})
+            self.user_store.put(
+                ig_uid, {"username": username, "uid": ig_uid, "universe": "ig"}
+            )
+            self.user_store.put(
+                threads_uid,
+                {"username": username, "uid": threads_uid, "universe": "threads"},
+            )
             self._wal_append({"id": intent_id, "state": "commit"})
             return rec
         except Exception:
@@ -273,7 +289,7 @@ class AtomicIndex:
             try:
                 # If we appended intent, we need to ensure we restore
                 # For simplicity, if we are in exception after putting index, restore
-                if 'old_ig' in locals():
+                if "old_ig" in locals():
                     # Check if we had put new index
                     cur = self.ig_store.get(username)
                     if cur and cur.get("ig_uid") == ig_uid:
@@ -290,7 +306,12 @@ class AtomicIndex:
                             try:
                                 p = self.user_store._shard_path(uid)
                                 data = self.user_store._load_shard(p)
-                                if str(uid) in data and data[str(uid)].get("username") == username and data[str(uid)].get("universe") in ("ig","threads"):
+                                if (
+                                    str(uid) in data
+                                    and data[str(uid)].get("username") == username
+                                    and data[str(uid)].get("universe")
+                                    in ("ig", "threads")
+                                ):
                                     # Only delete if it was newly created (old was None for that uid's blob)
                                     # For now, if old was None, delete
                                     # We need to know old blobs for those uids
@@ -322,11 +343,16 @@ class AtomicIndex:
                         decoded = encoding.decode(old_ig)
                     except ValueError:
                         decoded = None
-                if decoded and decoded.get("format") == "dual" and decoded.get("link_state") == "unlinked":
+                if (
+                    decoded
+                    and decoded.get("format") == "dual"
+                    and decoded.get("link_state") == "unlinked"
+                ):
                     raise ValueError(f"user {username} already unlinked")
                 if old_ig is None and old_threads is None:
                     raise ValueError(f"user {username} already unlinked")
             import uuid
+
             intent_id = str(uuid.uuid4())
             intent = {
                 "id": intent_id,
@@ -334,10 +360,14 @@ class AtomicIndex:
                 "username": username,
                 "old_ig": old_ig,
                 "old_threads": old_threads,
-                "state": "intent"
+                "state": "intent",
             }
             self._wal_append(intent)
-            old_decoded = encoding.decode(old_ig) if old_ig and old_ig.get("format") == "dual" else None
+            old_decoded = (
+                encoding.decode(old_ig)
+                if old_ig and old_ig.get("format") == "dual"
+                else None
+            )
             if old_decoded and old_decoded.get("format") == "dual":
                 ig_uid = old_decoded["ig_uid"]
             elif old_ig and old_ig.get("format") == "single":
@@ -351,9 +381,28 @@ class AtomicIndex:
             self.ig_store.put(username, new_rec)
             self._delete_from_threads(username)
             try:
-                self.user_store.put(ig_uid, {"username": username, "uid": ig_uid, "universe": "ig"})
+                self.user_store.put(
+                    ig_uid, {"username": username, "uid": ig_uid, "universe": "ig"}
+                )
             except ValueError:
                 pass
+            # Remove threads blob if it existed (unlink -> no threads blob)
+            if old_threads:
+                try:
+                    thr_uid = old_threads.get("uid")
+                    if thr_uid is not None:
+                        p = self.user_store._shard_path(thr_uid)
+                        data = self.user_store._load_shard(p)
+                        key = str(thr_uid)
+                        # blobs are stored with uid as key? In UserStore it's str(uid) or int
+                        # Try both
+                        if key in data:
+                            del data[key]
+                        if thr_uid in data:
+                            del data[thr_uid]
+                        self.user_store._save_shard(p, data)
+                except Exception:
+                    pass
             self._wal_append({"id": intent_id, "state": "commit"})
             return new_rec
         finally:
@@ -379,6 +428,7 @@ class AtomicIndex:
                 raise ValueError(f"to_user {to_user} already exists")
             encoding.encode_single(to_user, 1)
             import uuid
+
             intent_id = str(uuid.uuid4())
             intent = {
                 "id": intent_id,
@@ -389,7 +439,7 @@ class AtomicIndex:
                 "old_from_threads": from_threads,
                 "old_to_ig": to_ig,
                 "old_to_threads": to_threads,
-                "state": "intent"
+                "state": "intent",
             }
             self._wal_append(intent)
             new_to_ig = None
@@ -398,28 +448,54 @@ class AtomicIndex:
                 new_to_ig["username"] = to_user
                 if from_ig.get("format") == "dual":
                     dec = encoding.decode(from_ig)
-                    new_to_ig = encoding.encode_dual(to_user, dec["ig_uid"], dec["threads_uid"], dec["link_state"])
+                    new_to_ig = encoding.encode_dual(
+                        to_user, dec["ig_uid"], dec["threads_uid"], dec["link_state"]
+                    )
                 else:
                     new_to_ig = encoding.encode_single(to_user, from_ig["uid"])
                 self.ig_store.put(to_user, new_to_ig)
             if from_threads:
-                new_to_threads = {"username": to_user, "uid": from_threads["uid"], "format": "single"}
+                new_to_threads = {
+                    "username": to_user,
+                    "uid": from_threads["uid"],
+                    "format": "single",
+                }
                 self.threads_store.put(to_user, new_to_threads)
             # Update user blobs for moved uids to new username
             try:
                 if from_ig:
-                    dec = encoding.decode(from_ig) if from_ig.get("format") == "dual" else None
+                    dec = (
+                        encoding.decode(from_ig)
+                        if from_ig.get("format") == "dual"
+                        else None
+                    )
                     if dec and dec.get("format") == "dual":
                         ig_uid = dec["ig_uid"]
                         threads_uid = dec["threads_uid"]
                         if threads_uid is not None:
-                            self.user_store.put(ig_uid, {"username": to_user, "uid": ig_uid, "universe": "ig"})
-                            self.user_store.put(threads_uid, {"username": to_user, "uid": threads_uid, "universe": "threads"})
+                            self.user_store.put(
+                                ig_uid,
+                                {"username": to_user, "uid": ig_uid, "universe": "ig"},
+                            )
+                            self.user_store.put(
+                                threads_uid,
+                                {
+                                    "username": to_user,
+                                    "uid": threads_uid,
+                                    "universe": "threads",
+                                },
+                            )
                         else:
-                            self.user_store.put(ig_uid, {"username": to_user, "uid": ig_uid, "universe": "ig"})
+                            self.user_store.put(
+                                ig_uid,
+                                {"username": to_user, "uid": ig_uid, "universe": "ig"},
+                            )
                     elif from_ig.get("format") == "single":
                         ig_uid = from_ig["uid"]
-                        self.user_store.put(ig_uid, {"username": to_user, "uid": ig_uid, "universe": "ig"})
+                        self.user_store.put(
+                            ig_uid,
+                            {"username": to_user, "uid": ig_uid, "universe": "ig"},
+                        )
             except ValueError:
                 self._delete_from_store(to_user, ig=True, threads=True)
                 if old_from_ig is not None:
