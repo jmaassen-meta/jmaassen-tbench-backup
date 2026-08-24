@@ -7,7 +7,7 @@ Please extend the model under /app/dual_index. The foundation from the previous 
 | dual_index/atomic.py | AtomicIndex | Cross-universe, cross-shard atomic operations with per-row global locking |
 | dual_index/cli.py (extended) | link, unlink, rename commands | Command-line entry points for atomic operations |
 
-The store is now per-universe: under base_dir there are two sharded trees, one for IG and one for Threads (for example base_dir/ig and base_dir/threads, each containing its own sharded JSON files). A single-format username has an entry only in the IG tree; a dual linked username has entries in both trees under the same username key (IG entry holds the IG uid, Threads entry holds the Threads uid, link_state is tracked with the IG entry). The exact sub-directory names and internal file shapes are up to you, as long as the two universes are separate sharded stores under base_dir.
+The store is now per-universe: under base_dir there are two sharded trees, one for IG and one for Threads (for example base_dir/ig and base_dir/threads, each containing its own sharded JSON files). A single-format username has an entry only in the IG tree; a dual linked username has entries in both trees under the same username key (IG entry holds the IG uid as `ig_uid` and `link_state`, Threads entry holds the Threads uid as `uid` — tests read `ig["ig_uid"]` for IG and `threads["uid"]` for Threads). The exact sub-directory names and internal file shapes are up to you, as long as the two universes are separate sharded stores under base_dir.
 
 Atomic API — dual_index/atomic.py
 
