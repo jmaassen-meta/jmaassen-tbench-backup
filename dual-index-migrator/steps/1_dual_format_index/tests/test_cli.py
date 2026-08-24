@@ -159,6 +159,7 @@ def test_cli_default_base_dir():
 def test_cli_help():
     r = run_cli(["--help"])
     assert r.returncode == 0
-    assert "usage" in r.stdout.lower() or "usage" in r.stderr.lower()
+    low = (r.stdout + r.stderr).lower()
+    assert "usage:" in low and ("dual_index" in low or "init" in low)
     r = run_cli(["init", "--help"])
     assert r.returncode == 0
