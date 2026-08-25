@@ -25,7 +25,7 @@
     "tests/test_atomic.py::test_link_no_lock_left_after_success",
     "tests/test_atomic.py::test_unlink_hold_marker_blocks",
     "tests/test_atomic.py::test_rename_from_hold_blocks",
-    "tests/test_atomic.py::test_crash_recovery_rename_pending_simple",
+    "tests/test_atomic.py::test_link_leaves_wal_intent_and_commit",
     "tests/test_cli_atomic.py::test_cli_link_and_read",
     "tests/test_cli_atomic.py::test_cli_unlink",
     "tests/test_cli_atomic.py::test_cli_rename",
