@@ -287,3 +287,19 @@ def test_link_leaves_wal_intent_and_commit():
         # should have at least one intent and one commit for alice
         assert txt.count("intent") >= 1
         assert txt.count("commit") >= 1
+
+
+def test_rename_preserves_link_state_and_uids():
+    with tempfile.TemporaryDirectory() as tmp:
+        idx = AtomicIndex(tmp, 4)
+        idx.link("bob", 100, 200)
+        out_before = idx.read("bob")
+        assert out_before["link_state"] == "linked"
+        idx.rename("bob", "alice")
+        out_after = idx.read("alice")
+        assert out_after is not None
+        assert out_after["username"] == "alice"
+        assert out_after["ig_uid"] == 100
+        assert out_after["threads_uid"] == 200
+        assert out_after["link_state"] == "linked"
+        assert idx.read("bob") is None
