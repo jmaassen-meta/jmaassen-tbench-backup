@@ -289,6 +289,23 @@ def test_link_leaves_wal_intent_and_commit():
         assert txt.count("commit") >= 1
 
 
+def test_wal_intent_and_commit_share_same_id():
+    with tempfile.TemporaryDirectory() as tmp:
+        idx = AtomicIndex(tmp, 4)
+        idx.link("alice", 100, 200)
+        wal = Path(tmp) / "wal.jsonl"
+        lines = [l for l in wal.read_text().splitlines() if l.strip()]
+        assert len(lines) >= 2
+        import json
+
+        first = json.loads(lines[0])
+        last = json.loads(lines[-1])
+        assert "id" in first and "id" in last
+        assert first["id"] == last["id"]
+        assert first["state"] == "intent"
+        assert last["state"] == "commit"
+
+
 def test_rename_preserves_link_state_and_uids():
     with tempfile.TemporaryDirectory() as tmp:
         idx = AtomicIndex(tmp, 4)
