@@ -30,6 +30,8 @@
     "tests/test_atomic.py::test_rename_preserves_link_state_and_uids",
     "tests/test_atomic.py::test_wal_no_pending_after_success",
     "tests/test_atomic.py::test_read_respects_lock_returns_committed",
+    "tests/test_atomic.py::test_rename_to_hold_blocks",
+    "tests/test_atomic.py::test_crash_recovery_rename_with_to_snapshot",
     "tests/test_cli_atomic.py::test_cli_link_and_read",
     "tests/test_cli_atomic.py::test_cli_unlink",
     "tests/test_cli_atomic.py::test_cli_rename",

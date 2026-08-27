@@ -395,3 +395,76 @@ def test_read_respects_lock_returns_committed():
         out_final = idx2.read("bob")
         assert out_final is not None
         assert out_final["ig_uid"] == 100
+
+
+def test_rename_to_hold_blocks():
+    with tempfile.TemporaryDirectory() as tmp:
+        idx = AtomicIndex(tmp, 4)
+        idx.link("alice", 100, 200)
+        # hold on to_user should block rename even though from is free
+        Path(tmp, ".hold_charlie").touch()
+        with pytest.raises(ValueError):
+            idx.rename("alice", "charlie")
+        # no partial, charlie still absent
+        assert idx.read("charlie") is None
+        # cleanup hold and succeed
+        Path(tmp, ".hold_charlie").unlink()
+        idx.rename("alice", "charlie")
+        assert idx.read("charlie") is not None
+
+
+def test_crash_recovery_rename_with_to_snapshot():
+    with tempfile.TemporaryDirectory() as tmp:
+        idx = AtomicIndex(tmp, 4)
+        idx.link("alice", 100, 200)
+        idx.link("bob", 300, 400)
+        wal = Path(tmp) / "wal.jsonl"
+        import uuid, json
+
+        from dual_index.shard import ShardStore
+
+        # Simulate pending rename alice->charlie where old_to was None but partial left charlie
+        pending_id = str(uuid.uuid4())
+        ig = ShardStore(str(Path(tmp) / "ig"), 4)
+        old_from_ig = ig.get("alice")
+        old_from_threads = ShardStore(str(Path(tmp) / "threads"), 4).get("alice")
+        with open(wal, "a") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "id": pending_id,
+                        "op": "rename",
+                        "from_user": "alice",
+                        "to_user": "charlie",
+                        "old_from_ig": old_from_ig,
+                        "old_from_threads": old_from_threads,
+                        "old_to_ig": None,
+                        "old_to_threads": None,
+                        "state": "intent",
+                    },
+                    sort_keys=True,
+                )
+                + "\n"
+            )
+            # partial: charlie created, alice not yet deleted
+            ig.put(
+                "charlie",
+                {
+                    "username": "charlie",
+                    "ig_uid": 100,
+                    "threads_uid": 200,
+                    "link_state": "linked",
+                    "format": "dual",
+                },
+            )
+        # Next rename should trigger recovery and raise
+        idx2 = AtomicIndex(tmp, 4)
+        with pytest.raises(ValueError):
+            idx2.rename("bob", "charlie")
+        # After recovery, alice restored, charlie removed
+        assert idx2.read("alice") is not None
+        assert idx2.read("charlie") is None
+        # Now rename should succeed
+        idx2.rename("alice", "charlie")
+        assert idx2.read("charlie") is not None
+        assert idx2.read("alice") is None

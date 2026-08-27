@@ -248,4 +248,40 @@ def test_unlink_removes_threads_blob():
         assert res["inconsistent"] == 0
 
 
+def test_gc_removes_orphan_threads_without_ig():
+    with tempfile.TemporaryDirectory() as tmp:
+        threads = ShardStore(str(Path(tmp) / "threads"), 4)
+        threads.put("alice", {"username": "alice", "uid": 200, "format": "single"})
+        us = UserStore(tmp, 4)
+        us.put(200, {"username": "alice", "uid": 200, "universe": "threads"})
+        res = gc_dangling(tmp, 4)
+        assert res["dangling_found"] >= 1
+        # threads without IG is dangling — should be removed
+        assert threads.get("alice") is None
+        v = verify(tmp, 4)
+        assert v["inconsistent"] == 0
+
+
+def test_backfill_counts_both_lock_types():
+    with tempfile.TemporaryDirectory() as tmp:
+        idx = AtomicIndex(tmp, 4)
+        idx.link("alice", 100, 200)
+        idx.link("bob", 300, 400)
+        # lock alice via hold, bob via real lock
+        Path(tmp, ".hold_alice").touch()
+        # create a real lock file for bob via AtomicIndex internal? Simulate by touching .lock_bob
+        Path(tmp, ".lock_bob").touch()
+        res = backfill(tmp, 4)
+        # both should be counted as errors/busy
+        assert res["errors"] >= 2
+        # idempotent
+        res2 = backfill(tmp, 4)
+        assert res2["errors"] == res["errors"]
+        Path(tmp, ".hold_alice").unlink()
+        Path(tmp, ".lock_bob").unlink()
+        # after unlocking, no errors
+        res3 = backfill(tmp, 4)
+        assert res3["errors"] == 0
+
+
 import pytest
