@@ -1,7 +1,7 @@
 {
   "repo": "codimango/jmaassen-tbench",
   "instance_id": "",
-  "base_commit": "b6f13ef7766f52ad2a8aa37171180224f85c54d3",
+  "base_commit": "151efb6d47193442f78a8218c61bf8070a711f4d",
   "patch": "",
   "test_patch": "",
   "fail_to_pass": [
