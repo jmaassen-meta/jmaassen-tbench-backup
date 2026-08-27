@@ -28,6 +28,8 @@
     "tests/test_atomic.py::test_link_leaves_wal_intent_and_commit",
     "tests/test_atomic.py::test_wal_intent_and_commit_share_same_id",
     "tests/test_atomic.py::test_rename_preserves_link_state_and_uids",
+    "tests/test_atomic.py::test_wal_no_pending_after_success",
+    "tests/test_atomic.py::test_read_respects_lock_returns_committed",
     "tests/test_cli_atomic.py::test_cli_link_and_read",
     "tests/test_cli_atomic.py::test_cli_unlink",
     "tests/test_cli_atomic.py::test_cli_rename",

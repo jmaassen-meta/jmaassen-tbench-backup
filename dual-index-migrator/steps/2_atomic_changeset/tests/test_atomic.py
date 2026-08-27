@@ -320,3 +320,65 @@ def test_rename_preserves_link_state_and_uids():
         assert out_after["threads_uid"] == 200
         assert out_after["link_state"] == "linked"
         assert idx.read("bob") is None
+
+
+def test_wal_no_pending_after_success():
+    with tempfile.TemporaryDirectory() as tmp:
+        idx = AtomicIndex(tmp, 4)
+        idx.link("alice", 100, 200)
+        idx.link("bob", 300, 400)
+        idx.rename("bob", "charlie")
+        wal = Path(tmp) / "wal.jsonl"
+        import json
+
+        lines = [json.loads(l) for l in wal.read_text().splitlines() if l.strip()]
+        # Every intent should have a matching commit with same id
+        intents = {x["id"] for x in lines if x.get("state") == "intent"}
+        commits = {x["id"] for x in lines if x.get("state") == "commit"}
+        assert intents <= commits, (
+            f"pending intents without commit: {intents - commits}"
+        )
+
+
+def test_read_respects_lock_returns_committed():
+    with tempfile.TemporaryDirectory() as tmp:
+        idx = AtomicIndex(tmp, 4)
+        idx.link("alice", 100, 200)
+        # Simulate pending link for bob with partial write 999
+        wal = Path(tmp) / "wal.jsonl"
+        import uuid, json
+        from dual_index.shard import ShardStore
+
+        pending_id = str(uuid.uuid4())
+        with open(wal, "a") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "id": pending_id,
+                        "op": "link",
+                        "username": "bob",
+                        "old_ig": None,
+                        "old_threads": None,
+                        "state": "intent",
+                    },
+                    sort_keys=True,
+                )
+                + "\n"
+            )
+            ig = ShardStore(str(Path(tmp) / "ig"), 4)
+            ig.put(
+                "bob",
+                {
+                    "username": "bob",
+                    "ig_uid": 999,
+                    "threads_uid": 999,
+                    "link_state": "linked",
+                    "format": "dual",
+                },
+            )
+        # Read should not return partial 999, it should trigger recovery or return None
+        # Our AtomicIndex read should respect lock and not return partial
+        idx2 = AtomicIndex(tmp, 4)
+        out = idx2.read("bob")
+        # After recovery trigger via read or next op, bob should be gone (old None) or not partial
+        assert out is None or out.get("ig_uid") != 999
