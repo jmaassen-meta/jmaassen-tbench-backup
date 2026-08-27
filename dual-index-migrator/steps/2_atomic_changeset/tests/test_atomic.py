@@ -376,9 +376,22 @@ def test_read_respects_lock_returns_committed():
                     "format": "dual",
                 },
             )
-        # Read should not return partial 999, it should trigger recovery or return None
-        # Our AtomicIndex read should respect lock and not return partial
+        # Read must respect lock and not return partial 999. Spec says crash handler
+        # automatically recovers and returns an error (ValueError), leaving pre-op state.
         idx2 = AtomicIndex(tmp, 4)
-        out = idx2.read("bob")
-        # After recovery trigger via read or next op, bob should be gone (old None) or not partial
-        assert out is None or out.get("ig_uid") != 999
+        try:
+            out = idx2.read("bob")
+        except ValueError:
+            out = None
+        # After first operation (which raised ValueError and recovered), bob should be gone (old None) or not partial
+        if out is None:
+            # Recovery may have happened on first read that raised, so second read should be clean
+            out2 = idx2.read("bob")
+            assert out2 is None
+        else:
+            assert out.get("ig_uid") != 999
+        # After recovery, link should succeed cleanly
+        idx2.link("bob", 100, 200)
+        out_final = idx2.read("bob")
+        assert out_final is not None
+        assert out_final["ig_uid"] == 100
