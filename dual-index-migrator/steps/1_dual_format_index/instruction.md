@@ -22,8 +22,8 @@ Storage API — dual_index/shard.py
 
 | Class / Method | Signature | Behavior |
 |---|---|---|
-| ShardStore | ShardStore(base_dir, num_shards) | Creates a file-backed store under base_dir, split across num_shards shards |
-| put | put(username, record) | Saves a record for the username, picking the shard deterministically via a stable hash of the username % num_shards (not Python's per-run salted hash) |
+| ShardStore | ShardStore(base_dir, num_shards) | Creates a file-backed store under base_dir, split across num_shards shards. Each shard is persisted as a JSON file `shard_{i}.json` (0 <= i < num_shards) directly under base_dir containing a dict of username→record. |
+| put | put(username, record) | Saves a record for the username, picking the shard deterministically via `int(hashlib.md5(username.encode()).hexdigest(), 16) % num_shards` (stable across processes, not Python's per-run salted hash) |
 | get | get(username) | Returns the record dict for the username or None if not present, preserving the dict exactly |
 | shards | shards() | Returns num_shards |
 
@@ -31,7 +31,7 @@ Index API — dual_index/store.py
 
 | Class / Method | Signature | Behavior |
 |---|---|---|
-| DualIndex | DualIndex(base_dir, num_shards, fmt) | Wraps ShardStore and encoding; fmt is "single" or "dual" |
+| DualIndex | DualIndex(base_dir, num_shards, fmt) | Wraps ShardStore and encoding; fmt is "single" or "dual". Both write_single and write_dual must work regardless of fmt — during migration a store of either format still accepts both single and dual writes (the `fmt` is metadata; it does not restrict which write method is allowed). |
 | write_single | write_single(username, uid) | Encodes with encode_single and stores via the shard store |
 | write_dual | write_dual(username, ig_uid, threads_uid, link_state) | Encodes with encode_dual and stores via the shard store |
 | read | read(username) | Retrieves from the shard store and decodes, returning the normalized dict or None |
@@ -40,7 +40,7 @@ CLI — dual_index/cli.py invoked as python -m dual_index.cli
 
 | Command | Options | Behavior |
 |---|---|---|
-| init | --shards N --format single\|dual --base-dir PATH (default ./data) | Creates the shard directory and records shards and format in a small metadata file |
+| init | --shards N --format single\|dual --base-dir PATH (default ./data) | Creates the shard directory and records shards and format in `metadata.json` under base_dir (JSON object with keys `shards` and `format`) |
 | write | --user NAME --uid ID --base-dir PATH for single; --user NAME --ig-uid A --threads-uid B --link-state STATE --base-dir PATH for dual (threads-uid optional for unlinked) | Stores a record using the appropriate encoding |
 | read | --user NAME --base-dir PATH --output json | Prints the decoded record as JSON to stdout, or null if absent |
 
