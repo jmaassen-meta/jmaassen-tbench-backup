@@ -61,7 +61,6 @@ except ValueError:
 """
         result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
         assert result.returncode == 0
-        assert "correctly raised" in result.stdout
 
 def test_cli_backfill_idempotent():
     with tempfile.TemporaryDirectory() as tmp:

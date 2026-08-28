@@ -11,3 +11,10 @@ node_modules/
 .pytest_cache/
 *.harbor
 .review/
+# lh-night-calibration workspace (regenerated every round, not deliverable)
+audit/night-calibration/
+# local review/coverage artifacts that should not block Gate 1
+REVIEW-*.md
+artifacts/
+audit/coverage/coveragerc
+audit/coverage/coverage.lcov
