@@ -14,9 +14,9 @@ Encoding API — dual_index/encoding.py
 
 | Function | Inputs | Returns | Validation |
 |---|---|---|---|
-| encode_single | username: str, uid: int | dict with username, uid, format="single" | username lowercase 3-30 chars, a-z 0-9 _ . only, starts with letter; raises ValueError if invalid |
-| encode_dual | username: str, ig_uid: int, threads_uid: int or None, link_state: str | dict with username, ig_uid, threads_uid, link_state, format="dual" | same username rules; link_state must be linked or unlinked; threads_uid must be an int when linked and must be None when unlinked; raises ValueError otherwise |
-| decode | record: dict | normalized dict | raises ValueError if required keys are missing or types are wrong |
+| encode_single | username: str, uid: int (not bool) | dict with username, uid, format="single" | username lowercase 3-30 chars, a-z 0-9 _ . only, starts with letter; uid must be int and not bool (reject bool even though bool is subclass of int in Python); raises ValueError if invalid |
+| encode_dual | username: str, ig_uid: int (not bool), threads_uid: int or None (not bool), link_state: str | dict with username, ig_uid, threads_uid, link_state, format="dual" | same username rules; link_state must be linked or unlinked; threads_uid must be an int (not bool) when linked and must be None when unlinked; ig_uid must be int not bool; raises ValueError otherwise |
+| decode | record: dict | normalized dict | raises ValueError if required keys are missing or types are wrong, or if uid/ig_uid/threads_uid is bool |
 
 Storage API — dual_index/shard.py
 
