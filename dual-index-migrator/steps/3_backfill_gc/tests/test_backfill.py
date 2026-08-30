@@ -203,9 +203,8 @@ def test_gc_no_lock_left_after_success():
         us = UserStore(tmp, 4)
         us.put(100, {"username": "alice", "uid": 100, "universe": "ig"})
         gc_dangling(tmp, 4)
-        # after gc, subsequent operations still succeed (no stale serialization)
-        idx.link("alice", 999, 888)
-        assert idx.read("alice") is not None
+        # no lock files should remain
+        assert not list(Path(tmp).glob(".lock_*"))
 
 
 def test_backfill_verify_idempotent_and_lists():
@@ -268,14 +267,18 @@ def test_backfill_counts_both_lock_types():
         idx = AtomicIndex(tmp, 4)
         idx.link("alice", 100, 200)
         idx.link("bob", 300, 400)
-        # simulate external hold on alice (tests use .hold_ marker to simulate lock)
+        # lock alice via hold, bob via real lock
         Path(tmp, ".hold_alice").touch()
+        # create a real lock file for bob via AtomicIndex internal? Simulate by touching .lock_bob
+        Path(tmp, ".lock_bob").touch()
         res = backfill(tmp, 4)
-        assert res["errors"] >= 1
+        # both should be counted as errors/busy
+        assert res["errors"] >= 2
         # idempotent
         res2 = backfill(tmp, 4)
         assert res2["errors"] == res["errors"]
         Path(tmp, ".hold_alice").unlink()
+        Path(tmp, ".lock_bob").unlink()
         # after unlocking, no errors
         res3 = backfill(tmp, 4)
         assert res3["errors"] == 0
