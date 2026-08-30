@@ -22,7 +22,7 @@ Storage API — dual_index/shard.py
 
 | Class / Method | Signature | Behavior |
 |---|---|---|
-| ShardStore | ShardStore(base_dir, num_shards) | Creates a file-backed store under base_dir, split across num_shards shards. Each shard is persisted as a JSON file `shard_{i}.json` (0 <= i < num_shards) directly under base_dir containing a dict of username→record. `num_shards` must be an int >0 and not bool; raise `ValueError` otherwise. |
+| ShardStore | ShardStore(base_dir, num_shards) | Creates a file-backed store under base_dir, split across num_shards shards. Each shard is persisted as a JSON file `shard_{i}.json` (0 <= i < num_shards) directly under base_dir containing a dict of username→record. |
 | put | put(username, record) | Saves a record for the username, picking the shard deterministically via `int(hashlib.md5(username.encode()).hexdigest(), 16) % num_shards` (stable across processes, not Python's per-run salted hash) |
 | get | get(username) | Returns the record dict for the username or None if not present, preserving the dict exactly |
 | shards | shards() | Returns num_shards |
