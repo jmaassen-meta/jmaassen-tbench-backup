@@ -2,8 +2,11 @@ import hashlib
 import json
 from pathlib import Path
 
+
 class ShardStore:
     def __init__(self, base_dir, num_shards):
+        if isinstance(num_shards, bool) or not isinstance(num_shards, int):
+            raise ValueError("num_shards must be int")
         self.base_dir = Path(base_dir)
         self.num_shards = int(num_shards)
         if self.num_shards <= 0:
