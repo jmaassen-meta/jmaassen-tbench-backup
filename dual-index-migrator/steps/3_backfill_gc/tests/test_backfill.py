@@ -173,10 +173,14 @@ def test_verify_lists_inconsistent_users():
         us.put(100, {"username": "bob", "uid": 100, "universe": "ig"})
         res = verify(tmp, 4)
         assert res["inconsistent"] >= 1
-        assert "inconsistent_users" in res
-        assert (
-            "alice" in res["inconsistent_users"] or "bob" in res["inconsistent_users"]
+        # accept either key per TBD feedback (instruction now pins inconsistent_users, but near-complete attempts that used inconsistent_usernames should not be penalized)
+        assert "inconsistent_users" in res or "inconsistent_usernames" in res
+        users_key = (
+            "inconsistent_users"
+            if "inconsistent_users" in res
+            else "inconsistent_usernames"
         )
+        assert "alice" in res[users_key] or "bob" in res[users_key]
 
 
 def test_gc_idempotent():
