@@ -1,4 +1,5 @@
 import json
+# dual-index-migrator test - deterministic offline migration
 import subprocess
 import sys
 import tempfile

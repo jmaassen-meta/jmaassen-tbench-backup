@@ -1,4 +1,5 @@
 import tempfile
+# dual-index-migrator test - deterministic offline migration
 import json
 from pathlib import Path
 from dual_index.atomic import AtomicIndex

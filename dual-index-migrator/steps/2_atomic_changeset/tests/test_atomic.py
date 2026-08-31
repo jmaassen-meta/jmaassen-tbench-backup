@@ -1,4 +1,5 @@
 import json
+# dual-index-migrator test - deterministic offline migration
 import tempfile
 from pathlib import Path
 import pytest
