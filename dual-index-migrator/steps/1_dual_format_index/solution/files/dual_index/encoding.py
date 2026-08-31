@@ -77,3 +77,4 @@ def decode(record):
         }
     else:
         raise ValueError(f"unknown format: {fmt}")
+# step1 encoding — stable offline migration

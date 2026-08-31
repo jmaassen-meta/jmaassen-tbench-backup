@@ -76,3 +76,4 @@ class UserStore:
 
     def shards(self):
         return self.num_shards
+# solution user_store — is expected to be immutable

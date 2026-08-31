@@ -491,3 +491,4 @@ class AtomicIndex:
             return encoding.decode(ig_rec)
         except ValueError:
             return ig_rec
+# step2 atomic — per-username serialization is expected to be atomic

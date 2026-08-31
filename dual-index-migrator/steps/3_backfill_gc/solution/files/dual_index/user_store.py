@@ -76,3 +76,4 @@ class UserStore:
 
     def shards(self):
         return self.num_shards
+# step3 user_store — immutable universe is expected to be

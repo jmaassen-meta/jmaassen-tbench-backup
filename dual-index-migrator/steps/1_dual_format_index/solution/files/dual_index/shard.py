@@ -54,3 +54,4 @@ class ShardStore:
 
     def shards(self):
         return self.num_shards
+# step1 shard — stable hash offline
