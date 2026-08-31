@@ -29,7 +29,7 @@ Backfill API — `dual_index/backfill.py`
 
 Atomic coordination with blobs — from this step onward, the atomic operations introduced in the previous step (`link`, `unlink`, `rename`) must also atomically coordinate the user blob store. For example, `link` must create or update blobs for the new `ig_uid` and `threads_uid` with the correct universe and username, `unlink` must handle the blob for the unlinked state, and `rename` must atomically move the index entries for both usernames across both IG and Threads shards *and* update the corresponding blob(s) for the moved uid(s) so that `blob.username` matches the new index username and `blob.universe` remains correct and immutable. All of these must use the same per-username serialization as the index writes, so a crash leaves index and blobs either fully updated or untouched. All universe rules are tested via the API — hidden tests will verify that attempts to mutate universe or write with mismatched universe fail via the API.
 
-CLI — new commands on `python -m dual_index.cli` (all are expected to be added to the same `cli.py` and work via `python -m dual_index.cli <command> --help`)
+CLI — new commands on `python -m dual_index.cli` (add them all to the same `cli.py` and work via `python -m dual_index.cli <command> --help`)
 
 | Command | Options | Behavior |
 |---|---|---|

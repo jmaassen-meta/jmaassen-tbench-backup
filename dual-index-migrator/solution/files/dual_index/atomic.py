@@ -538,4 +538,3 @@ class AtomicIndex:
             return encoding.decode(ig_rec)
         except ValueError:
             return ig_rec
-# solution atomic — is expected to guarantee atomicity

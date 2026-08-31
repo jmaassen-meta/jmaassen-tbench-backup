@@ -273,4 +273,3 @@ def rollout_verify(base_dir, num_shards):
         "gc": gc,
         "rollout": status,
     }
-# step4 rollout — monotonic stepwise is expected to be

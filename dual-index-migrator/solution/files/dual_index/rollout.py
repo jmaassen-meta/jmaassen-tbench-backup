@@ -273,4 +273,3 @@ def rollout_verify(base_dir, num_shards):
         "gc": gc,
         "rollout": status,
     }
-# solution rollout — is expected to be monotonic

@@ -1,6 +1,6 @@
 Let's start with the foundation for an offline secondary index migration tool. The tool manages a sharded username index that exists in two formats: a legacy single-format where each username maps to a single uid, and a newer dual-format where each username maps to an IG uid, an optional Threads uid, and a link state. The full migration will come later; this step just sets up the core model.
 
-Please add the core model under /app/dual_index. Hidden tests will import the exact paths below via PYTHONPATH=/app, so keep the module and symbol names exactly as written.
+Add the core model under /app/dual_index — you'll fill in these modules: Hidden tests will import the exact paths below via PYTHONPATH=/app, so keep the module and symbol names exactly as written.
 
 | Module | Key symbols | Purpose |
 |---|---|---|
@@ -31,7 +31,7 @@ Index API — dual_index/store.py
 
 | Class / Method | Signature | Behavior |
 |---|---|---|
-| DualIndex | DualIndex(base_dir, num_shards, fmt) | Wraps ShardStore and encoding; fmt is "single" or "dual". Both write_single and write_dual are expected to work regardless of fmt — during migration a store of either format still accepts both single and dual writes (the `fmt` is metadata; it does not restrict which write method is allowed). |
+| DualIndex | DualIndex(base_dir, num_shards, fmt) | Wraps ShardStore and encoding; fmt is "single" or "dual". Both write_single and write_dual work regardless of fmt — during the migration a `single` store still accepts dual writes and vice versa. The `fmt` is just metadata, it doesn't block anything. |
 | write_single | write_single(username, uid) | Encodes with encode_single and stores via the shard store |
 | write_dual | write_dual(username, ig_uid, threads_uid, link_state) | Encodes with encode_dual and stores via the shard store |
 | read | read(username) | Retrieves from the shard store and decodes, returning the normalized dict or None |
