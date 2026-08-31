@@ -150,10 +150,10 @@ def advance_rollout(base_dir, num_shards, target_phase):
     v = verify(base_dir, num_shards)
     if v.get("inconsistent", 0) != 0:
         raise ValueError(f"verify not clean: {v}")
-    gc = gc_dangling(base_dir, num_shards)
+    gc = _gc_dry_run(base_dir, num_shards)
     if gc.get("dangling_found", 0) != 0:
         raise ValueError(f"gc found dangling: {gc}")
-    # All good, update rollout.json
+    # All good, update rollout.json (do not mutate shards here — caller runs gc_dangling explicitly if needed)
     new_status = {
         "phase": target_phase,
         "shards_migrated": target_shards,
@@ -165,10 +165,86 @@ def advance_rollout(base_dir, num_shards, target_phase):
     return new_status
 
 
+def _gc_dry_run(base_dir, num_shards):
+    # Read-only dangling detector: counts would-be gc findings without mutating shards.
+    # Mirrors gc_dangling's detection (threads without IG, missing blob, mismatched username/universe)
+    # but never writes, so rollout_verify stays read-only per R12.
+    from pathlib import Path as _P
+    import json as _json
+    from .shard import ShardStore as _SS
+    from .user_store import UserStore as _US
+    from . import encoding as _enc
+
+    base = _P(base_dir)
+    ig_dir = base / "ig"
+    threads_dir = base / "threads"
+    ig_store = _SS(str(ig_dir), num_shards) if ig_dir.exists() else None
+    threads_store = _SS(str(threads_dir), num_shards) if threads_dir.exists() else None
+    user_store = _US(str(base), num_shards)
+    usernames = set()
+    for d in [ig_dir, threads_dir]:
+        if not d.exists():
+            continue
+        for i in range(num_shards):
+            p = d / f"shard_{i}.json"
+            if p.exists():
+                try:
+                    with open(p, "r") as f:
+                        data = _json.load(f)
+                        if isinstance(data, dict):
+                            usernames.update(data.keys())
+                except Exception:
+                    continue
+    dangling_found = 0
+    for username in list(usernames):
+        if (base / f".hold_{username}").exists() or (
+            base / f".lock_{username}"
+        ).exists():
+            continue
+        ig_rec = ig_store.get(username) if ig_store else None
+        thr_rec = threads_store.get(username) if threads_store else None
+        if ig_rec is None and thr_rec is not None:
+            dangling_found += 1
+            continue
+        if ig_rec is None:
+            continue
+        try:
+            dec = _enc.decode(ig_rec)
+        except Exception:
+            dangling_found += 1
+            continue
+        # mismatch checks (same as gc_dangling's detection)
+        uids = []
+        if dec.get("format") == "single":
+            uids.append((dec.get("uid"), "ig"))
+        elif dec.get("format") == "dual":
+            uids.append((dec.get("ig_uid"), "ig"))
+            if dec.get("link_state") == "linked":
+                uids.append((dec.get("threads_uid"), "threads"))
+        for uid, exp_uni in uids:
+            blob = user_store.get(uid)
+            if (
+                blob is None
+                or blob.get("username") != username
+                or blob.get("universe") != exp_uni
+            ):
+                dangling_found += 1
+                break
+        else:
+            if (
+                dec.get("format") == "dual"
+                and dec.get("link_state") == "linked"
+                and threads_store
+                and thr_rec is None
+            ):
+                dangling_found += 1
+    return {"dangling_found": dangling_found, "scanned": len(usernames)}
+
+
 def rollout_verify(base_dir, num_shards):
     bf = backfill(base_dir, num_shards)
     v = verify(base_dir, num_shards)
-    gc = gc_dangling(base_dir, num_shards)
+    gc = _gc_dry_run(base_dir, num_shards)
     status = rollout_status(base_dir)
     overall = False
     # overall true only if verify inconsistent==0 and backfill needs_backfill==0 and gc dangling_found==0 and rollout at least partial with all migrated shards verified

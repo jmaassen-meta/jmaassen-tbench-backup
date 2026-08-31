@@ -35,6 +35,7 @@
     "tests/test_encoding.py::test_decode_unknown_format",
     "tests/test_encoding.py::test_decode_invalid_types",
     "tests/test_encoding.py::test_decode_invalid_username",
+    "tests/test_encoding.py::test_encode_rejects_bool_uid",
     "tests/test_shard.py::test_put_get_roundtrip",
     "tests/test_shard.py::test_get_absent_returns_none",
     "tests/test_shard.py::test_shards_returns_correct",
