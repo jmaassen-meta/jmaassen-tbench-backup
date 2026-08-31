@@ -1,4 +1,4 @@
-Now that the single and dual record formats and sharded storage are in place, let's add atomic cross-universe and cross-shard operations — the pattern that made the 1.5B/day username service hard. In production the username index is split by universe: IG and Threads each have their own sharded store, so even a single logical username touches two physical shard trees.
+Now that the single and dual record formats and sharded storage are in place, let's add atomic cross-universe and cross-shard operations — the part that's tricky when a single username has to update two places at once. In this design the username index is split by universe: IG and Threads each have their own sharded store, so even one logical username touches two physical shard trees.
 
 Extend the model under /app/dual_index — you're building on the encoding/shard/store you already have. The foundation from the previous step stays as-is (dual_index/encoding.py, dual_index/shard.py, dual_index/store.py, and the init/write/read commands). Hidden tests will import the exact new paths below via PYTHONPATH=/app.
 

@@ -2,7 +2,7 @@ schema_version = "1.1"
 
 [task]
 name = "codimango/dual-index-migrator"
-description = "TAO-like secondary index dual-format migration: atomically migrate a sharded username index from single-format to dual-format (IG/Threads linked), with backfill verification, dangling-pointer GC, and GK-gated phased rollout. Inspired by TAC 20B ITAS migration and UsernameUpdateService 1.5B/day atomic cross-shard writes."
+description = "Secondary index dual-format migration: atomically migrate a sharded username index from single-format to dual-format (IG/Threads linked), with backfill verification, dangling-pointer GC, and phased rollout."
 format = "swe_bench_multi_turn"
 workstream = "swe_public_repo"
 authors = [{name = "Jeffrey Maassen", email = "jmaassen@meta.com"}]

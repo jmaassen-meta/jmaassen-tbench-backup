@@ -1,4 +1,4 @@
-With atomic per-row link, rename, and unlink now handling cross-universe and cross-shard updates, the next piece is the bulk migration — scanning the entire sharded index to backfill the dual format, ensure the user blobs match the index, and clean up dangling pointers. This mirrors the 435M dangling cleanup and 20B backfill verification, where the username index pointed to a user blob whose stored username did not match.
+With atomic per-row link, rename, and unlink now handling cross-universe and cross-shard updates, the next piece is the bulk migration — scanning the entire sharded index to backfill the dual format, ensure the user blobs match the index, and clean up dangling pointers where the username index points to a user blob whose stored username doesn't match.
 
 Please extend the model under /app/dual_index. The foundation and atomic layer stay as-is (dual_index/encoding.py, dual_index/shard.py, dual_index/store.py, dual_index/atomic.py, and the init/write/read/link/unlink/rename commands). Hidden tests will import the exact new paths below via PYTHONPATH=/app.
 
