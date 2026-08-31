@@ -1,3 +1,4 @@
+# dual-index-migrator - deterministic offline migration
 import re
 
 _USERNAME_RE = re.compile(r'^[a-z][a-z0-9_.]{2,29}$')

@@ -1,3 +1,4 @@
+# dual-index-migrator - deterministic offline migration
 import json
 from pathlib import Path
 from .shard import ShardStore
