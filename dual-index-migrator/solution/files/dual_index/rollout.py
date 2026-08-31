@@ -153,15 +153,21 @@ def advance_rollout(base_dir, num_shards, target_phase):
     gc = _gc_dry_run(base_dir, num_shards)
     if gc.get("dangling_found", 0) != 0:
         raise ValueError(f"gc found dangling: {gc}")
-    # All good, update rollout.json (do not mutate shards here — caller runs gc_dangling explicitly if needed)
+    # All good, update rollout.json atomically via temp-file rename (per R12)
     new_status = {
         "phase": target_phase,
         "shards_migrated": target_shards,
         "total_shards": num_shards,
         "verified": True,
     }
-    with open(Path(base_dir) / "rollout.json", "w") as f:
+    import os as _os, tempfile as _tf
+
+    tmp_path = Path(base_dir) / "rollout.json.tmp"
+    with open(tmp_path, "w") as f:
         json.dump(new_status, f, sort_keys=True)
+        f.flush()
+        _os.fsync(f.fileno())
+    _os.replace(tmp_path, Path(base_dir) / "rollout.json")
     return new_status
 
 

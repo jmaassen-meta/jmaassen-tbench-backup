@@ -143,32 +143,45 @@ class AtomicIndex:
                         self.threads_store.put(username, old_threads)
                     else:
                         self._delete_from_threads(username)
-                # also handle blobs: need old blobs? For link, old blobs were for old_ig and old_threads uids
-                # For simplicity, if link had created new blobs, we should delete them on recovery
-                # The new blobs are for ig_uid and threads_uid in the intent's new values
-                # We can delete blobs for those uids if they were newly created (old was None)
-                # For now, just delete blobs for the new uids if old was None
+                # restore blobs from snapshot (per R12: restore blob state as well as index)
+                old_ig_blob = e.get("old_ig_blob")
+                old_threads_blob = e.get("old_threads_blob")
                 new_ig_uid = e.get("new_ig_uid")
                 new_threads_uid = e.get("new_threads_uid")
                 if new_ig_uid is not None:
-                    # check if old had blob for that uid? If old_ig was None, then new blob should be deleted
-                    if old_ig is None:
+                    if old_ig_blob is None:
                         try:
                             p = self.user_store._shard_path(new_ig_uid)
                             data = self.user_store._load_shard(p)
                             if str(new_ig_uid) in data:
                                 del data[str(new_ig_uid)]
                                 self.user_store._save_shard(p, data)
+                            if new_ig_uid in data:
+                                del data[new_ig_uid]
+                                self.user_store._save_shard(p, data)
+                        except Exception:
+                            pass
+                    else:
+                        try:
+                            self.user_store.put(new_ig_uid, old_ig_blob)
                         except Exception:
                             pass
                 if new_threads_uid is not None:
-                    if old_threads is None:
+                    if old_threads_blob is None:
                         try:
                             p = self.user_store._shard_path(new_threads_uid)
                             data = self.user_store._load_shard(p)
                             if str(new_threads_uid) in data:
                                 del data[str(new_threads_uid)]
                                 self.user_store._save_shard(p, data)
+                            if new_threads_uid in data:
+                                del data[new_threads_uid]
+                                self.user_store._save_shard(p, data)
+                        except Exception:
+                            pass
+                    else:
+                        try:
+                            self.user_store.put(new_threads_uid, old_threads_blob)
                         except Exception:
                             pass
             elif e.get("op") == "unlink":
@@ -247,12 +260,17 @@ class AtomicIndex:
             import uuid
 
             intent_id = str(uuid.uuid4())
+            # snapshot old blobs for atomic rollback (per authorFeedback: snapshot old blobs in WAL)
+            old_ig_blob = self.user_store.get(ig_uid)
+            old_threads_blob = self.user_store.get(threads_uid)
             intent = {
                 "id": intent_id,
                 "op": "link",
                 "username": username,
                 "old_ig": old_ig,
                 "old_threads": old_threads,
+                "old_ig_blob": old_ig_blob,
+                "old_threads_blob": old_threads_blob,
                 "new_ig_uid": ig_uid,
                 "new_threads_uid": threads_uid,
                 "state": "intent",
