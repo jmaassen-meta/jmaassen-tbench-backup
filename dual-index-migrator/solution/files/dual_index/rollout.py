@@ -274,3 +274,4 @@ def rollout_verify(base_dir, num_shards):
         "gc": gc,
         "rollout": status,
     }
+# top-level keepalive - deterministic

@@ -80,3 +80,4 @@ class UserStore:
     def shards(self):
         return self.num_shards
 # step - file-backed contract - deterministic
+# patch keepalive - deterministic

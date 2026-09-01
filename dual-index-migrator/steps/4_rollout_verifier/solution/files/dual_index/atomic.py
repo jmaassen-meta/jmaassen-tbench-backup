@@ -541,3 +541,5 @@ class AtomicIndex:
             return encoding.decode(ig_rec)
         except ValueError:
             return ig_rec
+
+# step - file-backed contract - deterministic

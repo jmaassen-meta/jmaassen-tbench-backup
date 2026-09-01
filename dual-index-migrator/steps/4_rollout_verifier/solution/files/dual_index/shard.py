@@ -57,3 +57,5 @@ class ShardStore:
 
     def shards(self):
         return self.num_shards
+
+# step - file-backed contract - deterministic

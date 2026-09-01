@@ -55,3 +55,4 @@ class ShardStore:
 
     def shards(self):
         return self.num_shards
+# top-level keepalive - deterministic

@@ -82,3 +82,4 @@ def decode(record):
 # touch for code patch
 
 # step top - deterministic
+# top-level keepalive - deterministic

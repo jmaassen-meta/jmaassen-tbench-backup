@@ -27,3 +27,5 @@ class DualIndex:
         if rec is None:
             return None
         return encoding.decode(rec)
+
+# step - file-backed contract - deterministic

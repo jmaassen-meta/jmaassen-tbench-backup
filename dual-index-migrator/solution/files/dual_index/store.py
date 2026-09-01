@@ -25,3 +25,4 @@ class DualIndex:
         if rec is None:
             return None
         return encoding.decode(rec)
+# top-level keepalive - deterministic

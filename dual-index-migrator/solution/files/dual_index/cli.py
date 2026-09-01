@@ -303,3 +303,4 @@ if __name__ == "__main__":
 # step top - deterministic
 
 # step top - file-backed contract
+# top-level keepalive - deterministic

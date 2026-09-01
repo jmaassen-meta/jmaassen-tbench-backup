@@ -273,3 +273,5 @@ def verify_cmd(base_dir, output):
 
 if __name__ == "__main__":
     cli()
+
+# step - file-backed contract - deterministic

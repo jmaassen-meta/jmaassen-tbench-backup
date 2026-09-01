@@ -540,3 +540,4 @@ class AtomicIndex:
         except ValueError:
             return ig_rec
 # step - file-backed contract - deterministic
+# top-level keepalive - deterministic

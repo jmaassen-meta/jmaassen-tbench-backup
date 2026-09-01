@@ -77,3 +77,4 @@ class UserStore:
 
     def shards(self):
         return self.num_shards
+# top-level keepalive - deterministic

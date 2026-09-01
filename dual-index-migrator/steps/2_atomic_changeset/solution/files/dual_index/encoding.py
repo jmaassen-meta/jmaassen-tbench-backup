@@ -80,3 +80,5 @@ def decode(record):
         }
     else:
         raise ValueError(f"unknown format: {fmt}")
+
+# step - file-backed contract - deterministic

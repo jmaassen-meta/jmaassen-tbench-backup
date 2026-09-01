@@ -3,3 +3,4 @@
 # step 2 - deterministic
 # dual_index package
 # step - file-backed contract - deterministic
+# patch keepalive - deterministic

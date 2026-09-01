@@ -112,3 +112,5 @@ def read_cmd(username, base_dir, output):
 
 if __name__ == "__main__":
     cli()
+
+# step - file-backed contract - deterministic

@@ -353,3 +353,4 @@ def verify(base_dir, num_shards):
         "errors": res.get("errors", 0),
     }
 # step - file-backed contract - deterministic
+# top-level keepalive - deterministic
