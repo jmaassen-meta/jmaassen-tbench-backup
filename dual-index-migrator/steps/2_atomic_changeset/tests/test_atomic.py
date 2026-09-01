@@ -1,4 +1,5 @@
 import json
+
 # dual-index-migrator test - deterministic offline migration
 import tempfile
 from pathlib import Path
@@ -295,16 +296,21 @@ def test_wal_intent_and_commit_share_same_id():
         idx = AtomicIndex(tmp, 4)
         idx.link("alice", 100, 200)
         wal = Path(tmp) / "wal.jsonl"
-        lines = [l for l in wal.read_text().splitlines() if l.strip()]
+        lines = [json.loads(l) for l in wal.read_text().splitlines() if l.strip()]
         assert len(lines) >= 2
-        import json
-
-        first = json.loads(lines[0])
-        last = json.loads(lines[-1])
-        assert "id" in first and "id" in last
-        assert first["id"] == last["id"]
-        assert first["state"] == "intent"
-        assert last["state"] == "commit"
+        # Journal must pair intent and commit with same id for each completed op.
+        # Check that at least one id appears as both intent and commit, rather than pinning line positions.
+        intents = {x["id"] for x in lines if x.get("state") == "intent" and "id" in x}
+        commits = {x["id"] for x in lines if x.get("state") == "commit" and "id" in x}
+        assert intents, "no intent entries found"
+        assert commits, "no commit entries found"
+        assert intents & commits, (
+            f"no intent/commit share same id: intents={intents} commits={commits}"
+        )
+        # Every intent from a completed operation should have a matching commit
+        assert intents <= commits, (
+            f"pending intents without commit: {intents - commits}"
+        )
 
 
 def test_rename_preserves_link_state_and_uids():
