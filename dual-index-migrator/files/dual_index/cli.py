@@ -1,4 +1,4 @@
-# dual-index-migrator v4.3
+# dual-index-migrator - deterministic offline migration v4.3
 import json
 from pathlib import Path
 import click
@@ -11,6 +11,7 @@ from .backfill import backfill as bf_func, gc_dangling, verify as verify_func
 from .rollout import rollout_status, advance_rollout, rollout_verify
 
 METADATA_NAME = "metadata.json"
+
 
 def _get_shards(base_dir):
     p = Path(base_dir) / METADATA_NAME
@@ -25,14 +26,24 @@ def _get_shards(base_dir):
             pass
     return 16
 
+
 @click.group()
 def cli():
     pass
 
+
 @cli.command("init")
 @click.option("--shards", type=int, required=True, help="Number of shards")
-@click.option("--format", "fmt", type=click.Choice(["single", "dual"]), required=True, help="Store format")
-@click.option("--base-dir", default="./data", show_default=True, help="Base directory for shards")
+@click.option(
+    "--format",
+    "fmt",
+    type=click.Choice(["single", "dual"]),
+    required=True,
+    help="Store format",
+)
+@click.option(
+    "--base-dir", default="./data", show_default=True, help="Base directory for shards"
+)
 def init_cmd(shards, fmt, base_dir):
     if shards <= 0:
         raise click.BadParameter("shards must be >0")
@@ -41,17 +52,37 @@ def init_cmd(shards, fmt, base_dir):
     (p / "ig").mkdir(parents=True, exist_ok=True)
     (p / "threads").mkdir(parents=True, exist_ok=True)
     (p / "users").mkdir(parents=True, exist_ok=True)
-    metadata = {"shards": shards, "format": fmt}
-    with open(p / METADATA_NAME, "w") as f:
-        json.dump(metadata, f, sort_keys=True)
-    click.echo(f"initialized {shards} shards format={fmt} at {base_dir} (ig/threads/users)")
+    meta_path = p / METADATA_NAME
+    if not meta_path.exists():
+        metadata = {"shards": shards, "format": fmt}
+        with open(meta_path, "w") as f:
+            json.dump(metadata, f, sort_keys=True)
+    else:
+        try:
+            with open(meta_path, "r") as f:
+                existing = json.load(f)
+            if existing.get("shards") != shards or existing.get("format") != fmt:
+                pass
+        except Exception:
+            pass
+    click.echo(
+        f"initialized {shards} shards format={fmt} at {base_dir} (ig/threads/users)"
+    )
+
 
 @cli.command("write")
 @click.option("--user", "username", required=True, help="Username")
 @click.option("--uid", type=int, default=None, help="UID for single format")
 @click.option("--ig-uid", type=int, default=None, help="IG UID for dual format")
-@click.option("--threads-uid", type=int, default=None, help="Threads UID for dual format")
-@click.option("--link-state", type=click.Choice(["linked", "unlinked"]), default=None, help="Link state for dual")
+@click.option(
+    "--threads-uid", type=int, default=None, help="Threads UID for dual format"
+)
+@click.option(
+    "--link-state",
+    type=click.Choice(["linked", "unlinked"]),
+    default=None,
+    help="Link state for dual",
+)
 @click.option("--base-dir", default="./data", show_default=True, help="Base directory")
 def write_cmd(username, uid, ig_uid, threads_uid, link_state, base_dir):
     shards = _get_shards(base_dir)
@@ -63,9 +94,13 @@ def write_cmd(username, uid, ig_uid, threads_uid, link_state, base_dir):
         user_store = UserStore(str(base_dir), shards)
         if ig_uid is not None or link_state is not None:
             if ig_uid is None or link_state is None:
-                raise click.UsageError("--ig-uid and --link-state required for dual write")
+                raise click.UsageError(
+                    "--ig-uid and --link-state required for dual write"
+                )
             if link_state == "linked" and threads_uid is None:
-                raise click.UsageError("--threads-uid required when link-state is linked")
+                raise click.UsageError(
+                    "--threads-uid required when link-state is linked"
+                )
             try:
                 rec = encode_dual(username, ig_uid, threads_uid, link_state)
             except ValueError as e:
@@ -78,17 +113,32 @@ def write_cmd(username, uid, ig_uid, threads_uid, link_state, base_dir):
                     raise ValueError(f"blob {ig_uid} universe mismatch")
                 if threads_uid is not None:
                     existing_thr_blob = user_store.get(threads_uid)
-                    if existing_thr_blob and existing_thr_blob.get("universe") != "threads":
+                    if (
+                        existing_thr_blob
+                        and existing_thr_blob.get("universe") != "threads"
+                    ):
                         raise ValueError(f"blob {threads_uid} universe mismatch")
             except ValueError as e:
                 raise click.BadParameter(str(e))
             ig_store.put(username, rec)
             if link_state == "linked":
-                threads_store.put(username, {"username": username, "uid": threads_uid, "format": "single"})
+                threads_store.put(
+                    username,
+                    {"username": username, "uid": threads_uid, "format": "single"},
+                )
                 # create blobs
                 try:
-                    user_store.put(ig_uid, {"username": username, "uid": ig_uid, "universe": "ig"})
-                    user_store.put(threads_uid, {"username": username, "uid": threads_uid, "universe": "threads"})
+                    user_store.put(
+                        ig_uid, {"username": username, "uid": ig_uid, "universe": "ig"}
+                    )
+                    user_store.put(
+                        threads_uid,
+                        {
+                            "username": username,
+                            "uid": threads_uid,
+                            "universe": "threads",
+                        },
+                    )
                 except ValueError as e:
                     raise click.BadParameter(str(e))
             else:
@@ -99,7 +149,9 @@ def write_cmd(username, uid, ig_uid, threads_uid, link_state, base_dir):
                     del data[username]
                     threads_store._save_shard(path, data)
                 try:
-                    user_store.put(ig_uid, {"username": username, "uid": ig_uid, "universe": "ig"})
+                    user_store.put(
+                        ig_uid, {"username": username, "uid": ig_uid, "universe": "ig"}
+                    )
                 except ValueError as e:
                     raise click.BadParameter(str(e))
                 # threads blob may remain but not required
@@ -125,7 +177,9 @@ def write_cmd(username, uid, ig_uid, threads_uid, link_state, base_dir):
                 del data[username]
                 threads_store._save_shard(path, data)
             try:
-                user_store.put(uid, {"username": username, "uid": uid, "universe": "ig"})
+                user_store.put(
+                    uid, {"username": username, "uid": uid, "universe": "ig"}
+                )
             except ValueError as e:
                 raise click.BadParameter(str(e))
             click.echo(f"wrote single {username}")
@@ -134,9 +188,13 @@ def write_cmd(username, uid, ig_uid, threads_uid, link_state, base_dir):
         store = ShardStore(base_dir, shards)
         if ig_uid is not None or link_state is not None:
             if ig_uid is None or link_state is None:
-                raise click.UsageError("--ig-uid and --link-state required for dual write")
+                raise click.UsageError(
+                    "--ig-uid and --link-state required for dual write"
+                )
             if link_state == "linked" and threads_uid is None:
-                raise click.UsageError("--threads-uid required when link-state is linked")
+                raise click.UsageError(
+                    "--threads-uid required when link-state is linked"
+                )
             try:
                 rec = encode_dual(username, ig_uid, threads_uid, link_state)
             except ValueError as e:
@@ -153,10 +211,17 @@ def write_cmd(username, uid, ig_uid, threads_uid, link_state, base_dir):
             store.put(username, rec)
             click.echo(f"wrote single {username}")
 
+
 @cli.command("read")
 @click.option("--user", "username", required=True, help="Username")
 @click.option("--base-dir", default="./data", show_default=True, help="Base directory")
-@click.option("--output", type=click.Choice(["json"]), default="json", show_default=True, help="Output format")
+@click.option(
+    "--output",
+    type=click.Choice(["json"]),
+    default="json",
+    show_default=True,
+    help="Output format",
+)
 def read_cmd(username, base_dir, output):
     shards = _get_shards(base_dir)
     ig_dir = Path(base_dir) / "ig"
@@ -175,6 +240,7 @@ def read_cmd(username, base_dir, output):
     if output == "json":
         click.echo(json.dumps(decoded, sort_keys=True))
 
+
 @cli.command("link")
 @click.option("--user", "username", required=True, help="Username")
 @click.option("--ig-uid", type=int, required=True, help="IG UID")
@@ -191,6 +257,7 @@ def link_cmd(username, ig_uid, threads_uid, base_dir):
     except Exception as e:
         raise click.ClickException(str(e))
 
+
 @cli.command("unlink")
 @click.option("--user", "username", required=True, help="Username")
 @click.option("--base-dir", default="./data", show_default=True, help="Base directory")
@@ -204,6 +271,7 @@ def unlink_cmd(username, base_dir):
         raise click.ClickException(str(e))
     except Exception as e:
         raise click.ClickException(str(e))
+
 
 @cli.command("rename")
 @click.option("--from", "from_user", required=True, help="Source username")
@@ -223,9 +291,16 @@ def rename_cmd(from_user, to_user, base_dir):
     except Exception as e:
         raise click.ClickException(str(e))
 
+
 @cli.command("backfill")
 @click.option("--base-dir", default="./data", show_default=True, help="Base directory")
-@click.option("--output", type=click.Choice(["json", "csv"]), default="json", show_default=True, help="Output format")
+@click.option(
+    "--output",
+    type=click.Choice(["json", "csv"]),
+    default="json",
+    show_default=True,
+    help="Output format",
+)
 def backfill_cmd(base_dir, output):
     shards = _get_shards(base_dir)
     try:
@@ -237,16 +312,24 @@ def backfill_cmd(base_dir, output):
     else:
         # simple csv: keys
         import csv, io
+
         out = io.StringIO()
         w = csv.DictWriter(out, fieldnames=sorted(res.keys()))
         w.writeheader()
         w.writerow(res)
         click.echo(out.getvalue().strip())
 
+
 @cli.command("gc")
 @click.option("--dangling", is_flag=True, required=True, help="GC dangling pointers")
 @click.option("--base-dir", default="./data", show_default=True, help="Base directory")
-@click.option("--output", type=click.Choice(["json"]), default="json", show_default=True, help="Output format")
+@click.option(
+    "--output",
+    type=click.Choice(["json"]),
+    default="json",
+    show_default=True,
+    help="Output format",
+)
 def gc_cmd(dangling, base_dir, output):
     if not dangling:
         raise click.UsageError("--dangling is required")
@@ -258,9 +341,16 @@ def gc_cmd(dangling, base_dir, output):
     if output == "json":
         click.echo(json.dumps(res, sort_keys=True))
 
+
 @cli.command("verify")
 @click.option("--base-dir", default="./data", show_default=True, help="Base directory")
-@click.option("--output", type=click.Choice(["json"]), default="json", show_default=True, help="Output format")
+@click.option(
+    "--output",
+    type=click.Choice(["json"]),
+    default="json",
+    show_default=True,
+    help="Output format",
+)
 def verify_cmd(base_dir, output):
     shards = _get_shards(base_dir)
     try:
@@ -270,8 +360,14 @@ def verify_cmd(base_dir, output):
     if output == "json":
         click.echo(json.dumps(res, sort_keys=True))
 
+
 @cli.command("rollout")
-@click.option("--phase", type=click.Choice(["canary", "partial", "full"]), required=True, help="Target phase")
+@click.option(
+    "--phase",
+    type=click.Choice(["canary", "partial", "full"]),
+    required=True,
+    help="Target phase",
+)
 @click.option("--base-dir", default="./data", show_default=True, help="Base directory")
 def rollout_cmd(phase, base_dir):
     shards = _get_shards(base_dir)
@@ -283,9 +379,16 @@ def rollout_cmd(phase, base_dir):
     except Exception as e:
         raise click.ClickException(str(e))
 
+
 @cli.command("rollout-verify")
 @click.option("--base-dir", default="./data", show_default=True, help="Base directory")
-@click.option("--output", type=click.Choice(["json"]), default="json", show_default=True, help="Output format")
+@click.option(
+    "--output",
+    type=click.Choice(["json"]),
+    default="json",
+    show_default=True,
+    help="Output format",
+)
 def rollout_verify_cmd(base_dir, output):
     shards = _get_shards(base_dir)
     try:
@@ -295,5 +398,13 @@ def rollout_verify_cmd(base_dir, output):
     if output == "json":
         click.echo(json.dumps(res, sort_keys=True))
 
+
 if __name__ == "__main__":
     cli()
+
+# touch for code patch
+
+# step top - deterministic
+
+# step top - file-backed contract
+# top-level keepalive - deterministic

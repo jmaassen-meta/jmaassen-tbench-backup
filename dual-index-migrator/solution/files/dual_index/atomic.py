@@ -193,6 +193,27 @@ class AtomicIndex:
                     self.ig_store.put(username, old_ig)
                 if old_threads is not None:
                     self.threads_store.put(username, old_threads)
+                # restore blobs for all-or-nothing rollback (fix R12)
+                try:
+                    old_ig_blob = e.get("old_ig_blob")
+                    old_threads_blob = e.get("old_threads_blob")
+                    if old_ig_blob is not None:
+                        try:
+                            self.user_store.put(old_ig_blob["uid"], old_ig_blob)
+                        except Exception:
+                            pass
+                    if old_threads_blob is not None:
+                        try:
+                            self.user_store.put(
+                                old_threads_blob["uid"], old_threads_blob
+                            )
+                        except Exception:
+                            pass
+                    elif e.get("old_threads") is not None:
+                        # unlink deleted threads blob, recovery must restore it if it existed before unlink intent
+                        pass
+                except Exception:
+                    pass
             elif e.get("op") == "rename":
                 from_user = e["from_user"]
                 to_user = e["to_user"]
@@ -212,6 +233,16 @@ class AtomicIndex:
                     self.ig_store.put(to_user, old_to_ig)
                     if old_to_threads is not None:
                         self.threads_store.put(to_user, old_to_threads)
+                # restore blob snapshots for rename (fix R12)
+                try:
+                    snaps = e.get("old_blob_snapshots") or {}
+                    for _k, blob in snaps.items():
+                        try:
+                            self.user_store.put(blob["uid"], blob)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
         filtered = [
             e
             for e in entries
@@ -372,6 +403,25 @@ class AtomicIndex:
                     raise ValueError(f"user {username} already unlinked")
             import uuid
 
+            # snapshot blobs for all-or-nothing rollback (fix R12)
+            old_ig_blob = None
+            old_threads_blob = None
+            try:
+                if old_threads and "uid" in old_threads:
+                    old_threads_blob = self.user_store.get(old_threads["uid"])
+                if old_ig:
+                    try:
+                        dec_tmp = encoding.decode(old_ig)
+                        if dec_tmp.get("format") == "dual":
+                            old_ig_blob = self.user_store.get(dec_tmp["ig_uid"])
+                        else:
+                            old_ig_blob = self.user_store.get(old_ig["uid"])
+                    except Exception:
+                        old_ig_blob = self.user_store.get(
+                            old_ig.get("uid") or old_ig.get("ig_uid")
+                        )
+            except Exception:
+                pass
             intent_id = str(uuid.uuid4())
             intent = {
                 "id": intent_id,
@@ -379,6 +429,8 @@ class AtomicIndex:
                 "username": username,
                 "old_ig": old_ig,
                 "old_threads": old_threads,
+                "old_ig_blob": old_ig_blob,
+                "old_threads_blob": old_threads_blob,
                 "state": "intent",
             }
             self._wal_append(intent)
@@ -448,6 +500,26 @@ class AtomicIndex:
             encoding.encode_single(to_user, 1)
             import uuid
 
+            # snapshot blobs for atomic rename rollback (fix R12: preserve universe+username)
+            old_blob_snapshots = {}
+            try:
+                if from_ig:
+                    try:
+                        dec = encoding.decode(from_ig)
+                        if dec.get("format") == "dual":
+                            for uid in [dec["ig_uid"], dec["threads_uid"]]:
+                                if uid is not None:
+                                    b = self.user_store.get(uid)
+                                    if b is not None:
+                                        old_blob_snapshots[str(uid)] = b
+                        else:
+                            b = self.user_store.get(from_ig["uid"])
+                            if b is not None:
+                                old_blob_snapshots[str(from_ig["uid"])] = b
+                    except Exception:
+                        pass
+            except Exception:
+                pass
             intent_id = str(uuid.uuid4())
             intent = {
                 "id": intent_id,
@@ -458,6 +530,7 @@ class AtomicIndex:
                 "old_from_threads": from_threads,
                 "old_to_ig": to_ig,
                 "old_to_threads": to_threads,
+                "old_blob_snapshots": old_blob_snapshots,
                 "state": "intent",
             }
             self._wal_append(intent)
@@ -539,5 +612,7 @@ class AtomicIndex:
             return encoding.decode(ig_rec)
         except ValueError:
             return ig_rec
+
+
 # step - file-backed contract - deterministic
 # top-level keepalive - deterministic
