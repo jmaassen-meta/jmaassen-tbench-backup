@@ -352,3 +352,4 @@ def verify(base_dir, num_shards):
         "already_dual": res.get("already_dual", 0),
         "errors": res.get("errors", 0),
     }
+# step - file-backed contract - deterministic

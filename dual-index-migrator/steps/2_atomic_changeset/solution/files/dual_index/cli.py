@@ -207,3 +207,4 @@ def rename_cmd(from_user, to_user, base_dir):
 
 if __name__ == "__main__":
     cli()
+# step - file-backed contract - deterministic
