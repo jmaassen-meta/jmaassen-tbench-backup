@@ -1,3 +1,4 @@
+# dual-index-migrator v4.3
 import json
 import hashlib
 from pathlib import Path

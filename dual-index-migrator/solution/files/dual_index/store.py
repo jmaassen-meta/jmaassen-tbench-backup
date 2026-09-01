@@ -1,4 +1,4 @@
-# dual-index-migrator - deterministic offline migration
+# dual-index-migrator - deterministic offline migration v4.3
 from pathlib import Path
 from .shard import ShardStore
 from . import encoding

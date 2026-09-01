@@ -1,3 +1,4 @@
+# dual-index-migrator v4.3
 from pathlib import Path
 from .shard import ShardStore
 from . import encoding
