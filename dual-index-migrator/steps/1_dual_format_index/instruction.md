@@ -23,8 +23,8 @@ Storage API - dual_index/shard.py
 | Class / Method | Signature | Behavior |
 |---|---|---|
 | ShardStore | ShardStore(base_dir, num_shards) | Creates a file-backed store under base_dir, split across num_shards shards. Each shard is persisted as a JSON file (for example one JSON file per shard under base_dir containing a dict of username→record). |
-| put | put(username, record) | Saves a record for the username, picking the shard deterministically via a stable hash (stable across processes, not Python's per-run salted hash) |
-| get | get(username) | Returns the record dict for the username or None if not present, preserving the dict exactly |
+| put | put(username, record) | Saves a record for the username, picking the shard deterministically via a stable hash (stable across processes, not Python's per-run salted hash). Must preserve the dict exactly as given, including extra keys, without re-sorting or dropping fields |
+| get | get(username) | Returns the record dict for the username or None if not present, preserving the dict exactly as stored |
 | shards | shards() | Returns num_shards |
 
 Index API - dual_index/store.py
@@ -40,7 +40,7 @@ CLI - dual_index/cli.py invoked as python -m dual_index.cli
 
 | Command | Options | Behavior |
 |---|---|---|
-| init | --shards N --format single\|dual --base-dir PATH (default ./data) | Creates the shard directory and records shards and format in `metadata.json` under base_dir (JSON object with keys `shards` and `format`) |
+| init | --shards N --format single\|dual --base-dir PATH (default ./data) | Creates the shard directory and records shards and format in `metadata.json` under base_dir (JSON object with keys `shards` and `format`). Must be idempotent — second init on same base_dir must not clobber existing shard files or metadata |
 | write | --user NAME --uid ID --base-dir PATH for single; --user NAME --ig-uid A --threads-uid B --link-state STATE --base-dir PATH for dual (threads-uid optional for unlinked) | Stores a record using the appropriate encoding |
 | read | --user NAME --base-dir PATH --output json | Prints the decoded record as JSON to stdout, or null if absent |
 
