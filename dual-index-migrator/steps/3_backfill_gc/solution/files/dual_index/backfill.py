@@ -1,4 +1,5 @@
 # dual-index-migrator - deterministic offline migration
+# step 3 - file-backed contract
 # step 3 - deterministic
 import json
 from pathlib import Path

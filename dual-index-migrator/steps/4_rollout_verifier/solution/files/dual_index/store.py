@@ -1,4 +1,5 @@
 # dual-index-migrator - deterministic offline migration
+# step 4 - file-backed contract
 # step 4 - deterministic
 from pathlib import Path
 from .shard import ShardStore
