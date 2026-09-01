@@ -1,4 +1,5 @@
 # dual-index-migrator - deterministic offline migration
+# step 2 - deterministic
 import json
 import hashlib
 from pathlib import Path

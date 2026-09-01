@@ -1,4 +1,5 @@
 # dual-index-migrator - deterministic offline migration
+# step 4 - deterministic
 import hashlib
 import json
 import re

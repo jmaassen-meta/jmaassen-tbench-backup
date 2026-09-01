@@ -80,3 +80,5 @@ def decode(record):
         raise ValueError(f"unknown format: {fmt}")
 
 # touch for code patch
+
+# step top - deterministic
